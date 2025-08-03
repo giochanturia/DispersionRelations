@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dispersionrelations"
+version = "1.0.0"
+authors = [
+    {name="George Chanturia"}
+]
+description = "Physics package for dispersion relations"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = ["numpy", "scipy", "scikit-image", "matplotlib"]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx",
+    "pydata-sphinx-theme",
+    "sphinx-rtd-theme",
+    "sphinx-copybutton",
+    "sphinxcontrib-bibtex",
+    "docutils",
+]
+dev = ["pytest"]

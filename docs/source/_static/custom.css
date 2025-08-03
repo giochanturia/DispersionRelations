@@ -1,0 +1,9 @@
+dl.function, dl.class {
+    border-top: 2px solid var(--pst-color-border);;
+    padding-top: 1.5em;
+    margin-top: 1.5em;
+}
+
+section#references {
+    margin-bottom: 1.5em;
+}
