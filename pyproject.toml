@@ -19,6 +19,11 @@ classifiers = [
 ]
 dependencies = ["numpy", "scipy", "scikit-image", "matplotlib"]
 
+[project.urls]
+homepage = "https://github.com/giochanturia/DispersionRelations"
+documentation = "https://dispersionrelations.readthedocs.io/"
+source = "https://github.com/giochanturia/DispersionRelations"
+
 [project.optional-dependencies]
 docs = [
     "sphinx",

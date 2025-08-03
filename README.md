@@ -1,6 +1,6 @@
 # Dispersion Relations
 
-<center><img src="docs/source/_static/DR_light.png" width="300"></center>
+<center><img src="https://raw.githubusercontent.com/giochanturia/DispersionRelations/refs/heads/main/docs/source/_static/DR_light.png" width="300"></center>
 
 The `dispersionrelations` package bundles methods commonly used in *phenomenological particle physics*.
 Included in the package and documented below are commonly occurring constants, such as masses and decay widths,
