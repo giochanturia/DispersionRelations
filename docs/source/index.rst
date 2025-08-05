@@ -9,6 +9,20 @@ Dispersion Relations
 ..     :class: only-dark
 ..     :width: 400px
 
+
+.. image:: https://img.shields.io/pypi/v/dispersionrelations
+   :alt: PyPI - Version
+   :target: https://pypi.org/project/dispersionrelations/
+
+.. image:: https://img.shields.io/github/license/giochanturia/DispersionRelations
+   :alt: GitHub License
+   :target: https://github.com/giochanturia/DispersionRelations/blob/main/LICENSE
+
+.. image:: https://img.shields.io/readthedocs/dispersionrelations
+   :alt: Read the Docs
+
+------
+
 The :code:`dispersionrelations` package bundles methods commonly used in *phenomenological particle physics*.
 Included in the package and documented below are commonly occurring constants, such as masses and decay widths,
 auxiliary functions used in kinematics as well as relations for the description of the dynamics of a system,
