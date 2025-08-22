@@ -3,6 +3,7 @@
 <center><img src="https://raw.githubusercontent.com/giochanturia/DispersionRelations/refs/heads/main/docs/source/_static/DR_light.png" width="300"></center>
 
 [![PyPI - Version](https://img.shields.io/pypi/v/dispersionrelations)](https://pypi.org/project/dispersionrelations/)
+[![DOI](https://zenodo.org/badge/1031462790.svg)](https://doi.org/10.5281/zenodo.16929922)
 [![GitHub License](https://img.shields.io/github/license/giochanturia/DispersionRelations)](https://github.com/giochanturia/DispersionRelations/blob/main/LICENSE)
 [![Read the Docs](https://img.shields.io/readthedocs/dispersionrelations)](https://dispersionrelations.readthedocs.io/)
 

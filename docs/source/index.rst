@@ -14,6 +14,10 @@ Dispersion Relations
    :alt: PyPI - Version
    :target: https://pypi.org/project/dispersionrelations/
 
+.. image:: https://zenodo.org/badge/1031462790.svg
+   :alt: Zenodo
+   :target: https://doi.org/10.5281/zenodo.16929922
+
 .. image:: https://img.shields.io/github/license/giochanturia/DispersionRelations
    :alt: GitHub License
    :target: https://github.com/giochanturia/DispersionRelations/blob/main/LICENSE
