@@ -26,7 +26,8 @@ The package was developed in the course of doctoral studies at the [University o
 The package is divided in the following submodules:
 
 - The `constants` module includes a collection of physical and mathematical constants and related functions used throughout the package.
-- The `utilities` module provides complex functions and statistical methods.
+- The `utilities` module provides auxilary complex functions.
+- The `data` module contains statistical methods.
 - The `kinematics` module accommodates functions necessary for particle kinematics such as phase space functions, etc.
 - The `dynamics` module houses integration vertices, particle propagators, channel definitions, etc.
 - The `integrals` module provides numerical integration routines for dispersion integrals.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dispersionrelations"
-version = "1.0.0"
+version = "1.1.0"
 authors = [
     {name="George Chanturia"}
 ]
@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "scipy", "scikit-image", "matplotlib"]
+dependencies = ["numpy", "scipy", "scikit-image", "matplotlib", "uncertainties"]
 
 [project.urls]
 homepage = "https://github.com/giochanturia/DispersionRelations"
@@ -33,7 +33,22 @@ docs = [
     "sphinxcontrib-bibtex",
     "docutils",
 ]
-dev = ["pytest"]
+dev = ["pytest", "pytest-cov"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=dispersionrelations --cov-report=html"
+
+[tool.coverage.run]
+branch = true
+source = ["dispersionrelations"]
+omit = [
+    "src/dispersionrelations/__init__.py",
+    "src/dispersionrelations/plotting.py",
+    "*/dispersionrelations/plotting.py",
+]
+
+[tool.coverage.html]
+extra_css = "docs/source/coverage/report_styles.css"

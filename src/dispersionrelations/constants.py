@@ -5,6 +5,7 @@ The base unit is taken to be `GeV`.
 """
 
 import numpy as np
+from uncertainties import ufloat
 
 
 MeV = 1e-3
@@ -22,13 +23,18 @@ r"""Gigaelectronvolt, numerically defined as :math:`10^{3}\times` :code:`MeV`.""
 TeV = 1e6 * GeV
 r"""Teraelectronvolt, numerically defined as :math:`10^{6}\times` :code:`MeV`."""
 
-alpha_fs = 1 / 137
+E_almost_zero = 1e-5 * GeV
+r"""A small energy, used in order to avoid division by zero."""
+
+s_almost_zero = E_almost_zero**2
+
+alpha_fs = 1 / 137.036
 r"""Electromagnetic fine structure constant :math:`\alpha_{\text{fs}}\approx1/137`."""
 
 e2 = 4 * np.pi * alpha_fs
 r"""Electric charge squared, :math:`e^2 = 4\pi\alpha_{\text{fs}}`."""
 
-to_nb = 3.894e5 * GeV**2
+to_nb = 1 / (2.56819 * 1e-6) * GeV**2
 r"""Conversion factor from natural units to nanobarns.
 
 **Note**: a "natural unit" is defined by whatever is equal to `1` by default.
@@ -47,10 +53,10 @@ r"""Mass of the charged pion :cite:`Zyla:2020zbs`."""
 M_PI0 = 134.98 * MeV
 r"""Mass of the neutral pion :cite:`Zyla:2020zbs`."""
 
-M_K = 493.68 * MeV
+M_K = 493.677 * MeV
 r"""Mass of the charged kaon :cite:`Zyla:2020zbs`."""
 
-M_K0 = 497.61 * MeV
+M_K0 = 497.611 * MeV
 r"""Mass of the neutral kaon :cite:`Zyla:2020zbs`."""
 
 M_RHO = 762.5 * MeV
@@ -122,7 +128,7 @@ r"""Standard deviation of the :math:`K^*` mass :cite:`Zyla:2020zbs`."""
 G_KSTAR = 2 * 26 * MeV
 r"""Width of the :math:`K^*` :cite:`Zyla:2020zbs`."""
 
-G_KSTAR_STD = 6 * MeV
+G_KSTAR_STD = 2 * 6 * MeV
 r"""Standard deviation of the :math:`K^*` width :cite:`Zyla:2020zbs`."""
 
 M_A1_POLE = 1209 * MeV
@@ -137,104 +143,69 @@ r"""Width of the :math:`a_1`, obtained from the pole position :cite:`JPAC:2018zw
 G_A1_POLE_STD = 100 * MeV  # largest error
 r"""Standard deviation of the :math:`a_1` width, obtained from the pole position :cite:`JPAC:2018zwp`."""
 
+BR_OMEGA_TO_3PI = 89.2 / 100
+r"""Branching ratio of :math:`\omega \to 3\pi` decay :cite:`Zyla:2020zbs`."""
 
-def scientific_notation(num, rounding=2):
-    r"""
-    Scientific notation.
+BR_OMEGA_TO_3PI_STD = 0.7 / 100
+r"""Standard deviation of the branching ratio of :math:`\omega \to 3\pi` decay :cite:`Zyla:2020zbs`."""
 
-    Parameters
-    ----------
-    num : float
-        A real number.
-    rounding : int
-        Number of digits after the period.
+__G_OMEGA = ufloat(G_OMEGA, G_OMEGA_STD)
+__BR_OMEGA_TO_3PI = ufloat(BR_OMEGA_TO_3PI, BR_OMEGA_TO_3PI_STD)
+__G_OMEGA_TO_3PI = __G_OMEGA * __BR_OMEGA_TO_3PI
 
-    Returns
-    -------
-    num_not : str
-        A LaTeX code for the number representation.
+G_OMEGA_TO_3PI = float(__G_OMEGA_TO_3PI.nominal_value)
+r"""Partial width of :math:`\omega \to 3\pi` decay."""
 
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from DispersionRelations.constants import scientific_notation
-    >>> print(scientific_notation(np.pi))
-    '3.1415926536'
-    >>> print(scientific_notation(13.4))
-    '1.34 \\times 10^{1}'
-    """
-    exponent = int(np.floor(np.log10(np.absolute(num))))
-    radical = round(num / (10**exponent), rounding)
-    if exponent == 0:
-        return str(radical)
-    return str(radical) + r" \times 10^{" + str(exponent) + "}"
+G_OMEGA_TO_3PI_STD = float(__G_OMEGA_TO_3PI.std_dev)
+r"""Standard deviation of the partial width of :math:`\omega \to 3\pi` decay."""
 
+BR_OMEGA_TO_PI0GAMMA = 8.33 / 100
+r"""Branching ratio of :math:`\omega \to \pi^0 \gamma` decay :cite:`Zyla:2020zbs`."""
 
-def rounding_PDG(mean, std):
-    r"""
-    Rounding with PDG rules :cite:`Zyla:2020zbs`.
+BR_OMEGA_TO_PI0GAMMA_STD = 0.25 / 100
+r"""Standard deviation of the branching ratio of :math:`\omega \to \pi^0 \gamma` decay :cite:`Zyla:2020zbs`.""" 
 
-    Parameters
-    ----------
-    mean : float
-        Mean value of the quantity.
-    std : float
-        Standard deviation of the quantity.
+__BR_OMEGA_TO_PI0GAMMA = ufloat(BR_OMEGA_TO_PI0GAMMA, BR_OMEGA_TO_PI0GAMMA_STD)
+__G_OMEGA_TO_PI0GAMMA = __G_OMEGA * __BR_OMEGA_TO_PI0GAMMA
 
-    Returns
-    -------
-    mean_out, std_out : (float, float)
-        Mean value and standard deviation, cited according to the PDG prescription.
+G_OMEGA_TO_PI0GAMMA = float(__G_OMEGA_TO_PI0GAMMA.nominal_value)
+r"""Partial width of :math:`\omega \to \pi^0 \gamma` decay."""
 
-    Examples
-    --------
-    >>> from DispersionRelations.constants import rounding_PDG
-    >>> print(rounding_PDG(0.827, 0.119))
-    (0.83, 0.12)
-    >>> print(rounding_PDG(0.827, 0.367))
-    (0.8, 0.4)
-    """
-    before_zero = int(np.floor(np.log10(np.absolute(std)))) + 1
-    three_highest_digits = int(std / 10 ** (before_zero - 3))
-    to_keep = 2  # default
-    if 100 <= three_highest_digits <= 354:
-        to_keep = 2
-    if 355 <= three_highest_digits <= 949:
-        to_keep = 1
-    if 950 <= three_highest_digits <= 999:
-        to_keep = 1  # because 1000 has 3 digits now
-        three_highest_digits = 1000
+G_OMEGA_TO_PI0GAMMA_STD = float(__G_OMEGA_TO_PI0GAMMA.std_dev)
+r"""Standard deviation of the partial width of :math:`\omega \to \pi^0 \gamma` decay."""
 
-    std_out = round(
-        three_highest_digits * 10 ** (before_zero - 3), to_keep - before_zero
-    )
-    mean_out = round(mean, to_keep - before_zero)
+G_RHO_TO_ETAGAMMA = 44.2 * keV
+r"""Partial width of :math:`\rho \to \eta \gamma` decay :cite:`Schafer:2023qtl`."""
 
-    if mean_out % 1 == 0 and std_out % 1 == 0:
-        mean_out = int(mean_out)
-        std_out = int(std_out)
+G_RHO_TO_ETAGAMMA_STD = 3.1 * keV
+r"""Standard deviation of the partial width of :math:`\rho \to \eta \gamma` decay :cite:`Schafer:2023qtl`."""
 
-    return mean_out, std_out
+BR_KSTAR_TO_KGAMMA_CHARGED = 0.098 / 100
+r"""Branching ratio of the charged :math:`K^* \to K \gamma` decay :cite:`Dax:2020dzg`."""
 
+BR_KSTAR_TO_KGAMMA_CHARGED_STD = 0.009 / 100
+r"""Standard deviation of the branching ratio of the charged :math:`K^* \to K \gamma` decay :cite:`Dax:2020dzg`."""
 
-def sR(M_R, G_R):
-    r"""
-    Resonance pole location calculated from its mass and width.
+BR_KSTAR_TO_KGAMMA_NEUTRAL = 0.246 / 100
+r"""Branching ratio of the neutral :math:`K^* \to K \gamma` decay :cite:`Dax:2020dzg`."""
 
-    Parameters
-    ----------
-    M_R : float
-        Mass of the particle.
-    G_R : float
-        Width of the particle.
+BR_KSTAR_TO_KGAMMA_NEUTRAL_STD = 0.021 / 100
+r"""Standard deviation of the branching ratio of the neutral :math:`K^* \to K \gamma` decay :cite:`Dax:2020dzg`."""
 
-    Returns
-    -------
-    sR : complex
-        The complex pole location.
+__G_KSTAR = ufloat(G_KSTAR, G_KSTAR_STD)
+__BR_KSTAR_TO_KGAMMA_CHARGED = ufloat(BR_KSTAR_TO_KGAMMA_CHARGED, BR_KSTAR_TO_KGAMMA_CHARGED_STD)
+__BR_KSTAR_TO_KGAMMA_NEUTRAL = ufloat(BR_KSTAR_TO_KGAMMA_NEUTRAL, BR_KSTAR_TO_KGAMMA_NEUTRAL_STD)
+__G_KSTAR_TO_KGAMMA_CHARGED = __G_KSTAR * __BR_KSTAR_TO_KGAMMA_CHARGED
+__G_KSTAR_TO_KGAMMA_NEUTRAL = __G_KSTAR * __BR_KSTAR_TO_KGAMMA_NEUTRAL
 
-    Notes
-    -----
-    The pole location is calculated using :math:`s_R(M_R, \Gamma_R) = (M_R - i \Gamma_R / 2)^2`.
-    """
-    return (M_R - 1j * G_R / 2) ** 2
+G_KSTAR_TO_KGAMMA_CHARGED = float(__G_KSTAR_TO_KGAMMA_CHARGED.nominal_value)
+r"""Partial width of the charged :math:`K^* \to K \gamma` decay."""
+
+G_KSTAR_TO_KGAMMA_CHARGED_STD = float(__G_KSTAR_TO_KGAMMA_CHARGED.std_dev)
+r"""Standard deviation of the partial width of the charged :math:`K^* \to K \gamma` decay."""
+
+G_KSTAR_TO_KGAMMA_NEUTRAL = float(__G_KSTAR_TO_KGAMMA_NEUTRAL.nominal_value)
+r"""Partial width of the neutral :math:`K^* \to K \gamma` decay."""
+
+G_KSTAR_TO_KGAMMA_NEUTRAL_STD = float(__G_KSTAR_TO_KGAMMA_NEUTRAL.std_dev)
+r"""Standard deviation of the partial width of the neutral :math:`K^* \to K \gamma` decay."""

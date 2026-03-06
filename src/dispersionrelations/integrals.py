@@ -1,5 +1,7 @@
+import warnings
+
 import numpy as np
-from dispersionrelations.utils import *
+from dispersionrelations.utils import logC
 
 z_gl_100, w_gl_100 = np.polynomial.legendre.leggauss(100)
 z_gl_500, w_gl_500 = np.polynomial.legendre.leggauss(500)
@@ -14,7 +16,7 @@ gl_storage = {
 }
 
 
-def integrate_gl(function, a, b, order=100, split_n=3):
+def integrate_gl(function : callable, a : float, b : float, order : int = 100, split_n : int = 3):
     r"""
     Gauss–Legendre integration.
     
@@ -47,7 +49,7 @@ def integrate_gl(function, a, b, order=100, split_n=3):
     return np.sum(function(s_prime) * gl_weights * jacobian)
 
 
-def residue(function, z0, radius=1e-2, order=100, split_n=3):
+def residue(function : callable, z0 : complex, radius : float = 1e-2, order : int = 100, split_n : int = 3):
     r"""
     Residue of a complex function.
     
@@ -98,7 +100,7 @@ class SimplePoleMonomial:
     NotImplementedError
         Any input :code:`n` other than an integer or a half-integer triggers an error.
     """
-    def __init__(self, n):
+    def __init__(self, n : float):
         self.n = n
         if n % 1 == 0:
             if n == 0:
@@ -275,7 +277,7 @@ class DispersionIntegralRHC:
     integration_order : int, optional
         Gauss–Legendre quadrature order.
     subtraction_point : float, optional
-        Point :math:`s_0` of subtraction.
+        Point :math:`s_0` of subtraction. Needs to be below the threshold.
     subtraction_constants : array_like, optional
         Array of :math:`f_i` subtraction constants. Defines subtraction level :math:`n`.
 
@@ -291,13 +293,13 @@ class DispersionIntegralRHC:
     """
     def __init__(
         self,
-        integrand,
-        threshold,
-        infinity=1e6,
-        integration_split_points=[2, 5, 10, 50, 100],
-        integration_order=100,
-        subtraction_point=0,
-        subtraction_constants=[0],
+        integrand : callable,
+        threshold : float,
+        infinity : float = 1e6,
+        integration_split_points : list[float] = [2, 5, 10, 50, 100],
+        integration_order : int = 100,
+        subtraction_point : float = 0,
+        subtraction_constants : list[float] = [0],
     ):
         self.integrand = integrand
         self.threshold = threshold
@@ -309,6 +311,8 @@ class DispersionIntegralRHC:
         self.order = integration_order
 
         self.s0 = subtraction_point
+        if self.s0 >= self.threshold:
+            warnings.warn(f"Subtraction point s0={self.s0} needs to be below the threshold={self.threshold}.")
         self.f0_arr = subtraction_constants
         self.n_subtr = len(subtraction_constants)
 

@@ -1,3 +1,10 @@
+import os
+import re
+import json
+import warnings
+from datetime import datetime
+import warnings
+
 import numpy as np
 
 
@@ -11,12 +18,19 @@ def sqrt_custom_branch_cut(z, t_bc, sheet=1):
         A complex number or sequence of complex numbers.
     t_bc : float
         The angle of the branch cut in radians.
+    sheet : int
+        The sheet of the square root function. Must be 1 or 2.
 
     Returns
     -------
     w : array_like
         The same shape as input `z`.
-    
+
+    Raises
+    ------
+    ValueError
+        If `sheet` is not 1 or 2.
+
     Examples
     --------
 
@@ -31,16 +45,17 @@ def sqrt_custom_branch_cut(z, t_bc, sheet=1):
         label = r"sqrt"
         sqrt_plot_input = prepare_complex_plot_input(lambda z: sqrt_custom_branch_cut(z, np.pi/7), *re_im, label)
         _ = complex_plot_contours(sqrt_plot_input)
-    """
+    """ 
+    if sheet not in (1, 2):
+        raise ValueError("Sheet for the square root must be 1 or 2.")
+    sheet_selector = dict({1: 1, 2: -1})[sheet]
     r = np.abs(z)
-    if sheet==2:
-        r *= -1
     t = np.angle(z)
     t = np.where(t >= t_bc, t, t + 2 * np.pi) - t_bc
-    return np.sqrt(r) * np.exp(1j * t / 2)
+    return np.sqrt(r) * np.exp(1j * t / 2) * sheet_selector
 
 
-def sqrtRHC(z):
+def sqrtRHC(z, sheet=1):
     r"""
     Square root with the right-hand-cut :math:`z\in[0,\infty)` in the real part.
 
@@ -48,11 +63,18 @@ def sqrtRHC(z):
     ----------
     z : array_like
         A complex number or sequence of complex numbers.
+    sheet : int
+        The sheet of the square root function. Must be 1 or 2.
 
     Returns
     -------
     w : array_like
         The same shape as input `z`.
+
+    Raises
+    ------
+    ValueError
+        If `sheet` is not 1 or 2.
 
     Examples
     --------
@@ -69,10 +91,10 @@ def sqrtRHC(z):
         sqrtRHC_plot_input = prepare_complex_plot_input(sqrtRHC, *re_im, label)
         _ = complex_plot_contours(sqrtRHC_plot_input)
     """
-    return sqrt_custom_branch_cut(z, t_bc=0)
+    return sqrt_custom_branch_cut(z, t_bc=0, sheet=sheet)
 
 
-def sqrtLHC(z):
+def sqrtLHC(z, sheet=1):
     r"""
     Square root with the left-hand-cut :math:`z\in(-\infty,0]` in the real part.
 
@@ -80,11 +102,18 @@ def sqrtLHC(z):
     ----------
     z : array_like
         A complex number or sequence of complex numbers.
+    sheet : int
+        The sheet of the square root function. Must be 1 or 2.
 
     Returns
     -------
     w : array_like
         The same shape as input `z`.
+
+    Raises
+    ------
+    ValueError
+        If `sheet` is not 1 or 2.
 
     Examples
     --------
@@ -112,7 +141,7 @@ def sqrtLHC(z):
         sqrt_plot_input = prepare_complex_plot_input(np.sqrt, *re_im, label)
         _ = complex_plot_contours(sqrt_plot_input)
     """
-    return sqrt_custom_branch_cut(z, t_bc=np.pi)
+    return sqrt_custom_branch_cut(z, t_bc=np.pi, sheet=sheet)
 
 
 def log_custom_branch_cut(z, t_bc):
@@ -347,275 +376,186 @@ def conformal_variable(s, sE, sL):
     return (sqrt_A - sqrt_B) / (sqrt_A + sqrt_B)
 
 
-def chi2(fit_data, observed_data, covariance_matrix, weights=None):
+def cite(ref):
     r"""
-    :math:`\chi^2`, computed using modelled and observed data.
+    Produces a LaTeX citation command.
 
     Parameters
     ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    covariance_matrix : array_like
-        Covariance matrix of the experimental data, :math:`C \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
+    ref : str
+        The reference key.
 
     Returns
     -------
-    s : float
-        The total :math:`\chi^2`.
+    citation : str
+        The LaTeX citation command :code:`\cite{ref}`.
 
-    Notes
-    -----
-    The :math:`\chi^2` is calculated using
+    See Also
+    --------
+    uncite : Inverse operation.
+    """
+    return r"\cite{" + ref + "}"
 
-    .. math:: \chi^2 = \sum_i \sum_j (f_i-o_i)(C^{-1}_{ij}W_{ij})(f_j-o_j).
+
+def uncite(citation):
+    r"""
+    Inverse operation of :func:`cite`.
+    Extracts the reference key from a LaTeX citation command.
+
+    Parameters
+    ----------
+    citation : str
+        The LaTeX citation command :code:`\cite{ref}`.
+
+    Returns
+    -------
+    ref : str
+        The reference key.
+
+    Raises
+    ------
+    ValueError
+        If the input is not in the correct format.
 
     See also
     --------
-    dispersionrelations.utils.chi2_vector : for individual contributions.
+    cite : Forward operation.
     """
-    if weights is not None:
-        covariance_matrix = covariance_matrix / weights
-    difference = fit_data - observed_data
-    return difference @ np.linalg.inv(covariance_matrix) @ difference
+    if citation[:6] != r"\cite{" or citation[-1] != "}":
+        raise ValueError(f"Invalid citation format: {citation}")
+    result = citation[6:-1]
+    if result == "":
+        warnings.warn("Empty citation key.")
+    return result
 
 
-def chi2_with_inverse(fit_data, observed_data, inverse_covariance_matrix, weights=None):
+def save_to_json(data, filename : str = None, folder : str = "", metadata : dict = {}):
     r"""
-    :math:`\chi^2`, computed using modelled and observed data.
-    This version of the function accepts the inverse of the covariance matrix
-    as a parameter and therefore gains speed by avoiding matrix inversion.
+    Saves a dictionary to a JSON file.
 
     Parameters
     ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    inverse_covariance_matrix : array_like
-        Inverted covariance matrix of the experimental data, :math:`I \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
+    data : dict
+        The data to be saved.
+    filename : str
+        The name of the file to save the data to. If None, the current date and time will be used.
+    folder : str
+        The folder to save the file in. Default is the current folder.
+    metadata : dict
+        Additional metadata to be included in the JSON file. Default is an empty dictionary.
 
     Returns
     -------
-    s : float
-        The total :math:`\chi^2`.
-
-    Notes
-    -----
-    The :math:`\chi^2` is calculated using
-
-    .. math:: \chi^2 = \sum_i \sum_j (f_i-o_i)(I_{ij}W_{ij})(f_j-o_j).
-
-    See also
-    --------
-    dispersionrelations.utils.chi2_vector_with_inverse : for individual contributions.
+    None
     """
-    if weights is not None:
-        inverse_covariance_matrix = inverse_covariance_matrix * weights
-    difference = fit_data - observed_data
-    return difference @ inverse_covariance_matrix @ difference
+
+    if filename is None:
+        filename = datetime.now().strftime("%Y_%m%d_%H%M%S")
+
+    if os.path.exists(os.path.join(folder, filename + ".json")):
+        warnings.warn(f"File {filename} already exists in folder {folder}. Renaming the old file to avoid overwriting.")
+        os.rename(os.path.join(folder, filename + ".json"), os.path.join(folder, filename + "_old.json"))
+
+    with open(os.path.join(folder, filename + ".json"), "w") as f:
+        json.dump({**data, **metadata}, f, indent=4, ensure_ascii=False)
 
 
-def chi2_vector(fit_data, observed_data, covariance_matrix, weights=None):
+def load_from_json(filename : str, folder : str = ""):
     r"""
-    :math:`\chi^2` vector.
+    Loads a dictionary from a JSON file.
 
     Parameters
     ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    covariance_matrix : array_like
-        Covariance matrix of the experimental data, :math:`C \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
+    filename : str
+        The name of the file to load the data from.
+    folder : str
+        The folder to load the file from. Default is the current folder.
 
     Returns
     -------
-    v : array_like
-        A vector with shape (n,) of individual :math:`\chi^2` contributions.
+    data : dict
+        The loaded data.
+    """
+    with open(os.path.join(folder, filename + ".json"), "r") as f:
+        return json.load(f)
 
-    Notes
-    -----
-    The :math:`\chi^2` vector is built using
 
-    .. math:: v_i = \sum_j (f_i-o_i)(C^{-1}_{ij}W_{ij})(f_j-o_j).
 
-    Warning
+
+def scientific_notation(num, rounding=2):
+    r"""
+    Scientific notation.
+
+    Parameters
+    ----------
+    num : float
+        A real number.
+    rounding : int
+        Number of digits after the period.
+
+    Returns
     -------
-    When the covariance matrix is non-diagonal, the individual components of this
-    vector do not have a statistical meaning, since the observations are correlated.
-    Use with caution!
+    num_not : str
+        A LaTeX code for the number representation.
 
     Examples
     --------
     >>> import numpy as np
-    >>> from dispersionrelations.utils import chi2_vector
-    >>> np.random.seed(137)
-    >>> n = 10
-    >>> x_f = np.linspace(1, 2, n)
-    >>> x_o = x_f + 0.1 * np.random.rand(n)
-    >>> x_e = 0.1 * (np.random.rand(n) + 1) / 2
-    >>> x_C = np.diag(x_e)**2
-    >>> print(chi2_vector(x_f, x_o, x_C))
-    [0.89280398 0.01007333 0.62584069 0.67718574 0.32026806 0.99981995 0.91740446 0.01387227 2.33635045 0.18841755]
-
-    .. plot::
-
-        import numpy as np
-        from dispersionrelations.utils import chi2_vector
-        import matplotlib.pyplot as plt
-
-        np.random.seed(137)
-        n = 10
-        x_f = np.linspace(1, 2, n)
-        x_o = x_f + 0.1 * np.random.rand(n)
-        x_e = 0.1 * (np.random.rand(n) + 1) / 2
-        x_C = np.diag(x_e)**2
-        x_chi2_vector = chi2_vector(x_f, x_o, x_C)
-        plt.errorbar(np.arange(n), x_o, yerr=x_e, fmt="o", markersize=0, capsize=2, label="observed_data", zorder=2)
-        plt.plot(np.arange(n), x_f, label="fit_data", zorder=2)
-        plt.fill_between(np.arange(n), 0.1 * x_chi2_vector, 0, color='tab:red', label=r"$\chi^2/10$", zorder=3)
-        plt.legend()
-
-    See also
-    --------
-    dispersionrelations.utils.chi2
+    >>> from DispersionRelations.constants import scientific_notation
+    >>> print(scientific_notation(np.pi))
+    '3.1415926536'
+    >>> print(scientific_notation(13.4))
+    '1.34 \\times 10^{1}'
     """
-    if weights is not None:
-        covariance_matrix = covariance_matrix / weights
-    difference = fit_data - observed_data
-    return difference * (np.linalg.inv(covariance_matrix) @ difference)
+    exponent = int(np.floor(np.log10(np.absolute(num))))
+    radical = round(num / (10**exponent), rounding)
+    if exponent == 0:
+        return str(radical)
+    return str(radical) + r" \times 10^{" + str(exponent) + "}"
 
 
-def chi2_vector_with_inverse(
-    fit_data, observed_data, inverse_covariance_matrix, weights=None
-):
+def rounding_PDG(mean, std):
     r"""
-    :math:`\chi^2`, computed using modelled and observed data.
-    This version of the function accepts the inverse of the covariance matrix
-    as a parameter and therefore gains speed by avoiding matrix inversion.
+    Rounding with PDG rules :cite:`Zyla:2020zbs`.
 
     Parameters
     ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    inverse_covariance_matrix : array_like
-        Inverted covariance matrix of the experimental data, :math:`I \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
+    mean : float
+        Mean value of the quantity.
+    std : float
+        Standard deviation of the quantity.
 
     Returns
     -------
-    v : array_like
-        A vector with shape (n,) of individual :math:`\chi^2` contributions.
+    mean_out, std_out : (float, float)
+        Mean value and standard deviation, cited according to the PDG prescription.
 
-    Notes
-    -----
-    The :math:`\chi^2` vector is built using
-
-    .. math:: v_i = \sum_j (f_i-o_i)(I_{ij}W_{ij})(f_j-o_j).
-
-    See also
+    Examples
     --------
-    dispersionrelations.utils.chi2_with_inverse
+    >>> from DispersionRelations.constants import rounding_PDG
+    >>> print(rounding_PDG(0.827, 0.119))
+    (0.83, 0.12)
+    >>> print(rounding_PDG(0.827, 0.367))
+    (0.8, 0.4)
     """
-    if weights is not None:
-        inverse_covariance_matrix = inverse_covariance_matrix * weights
-    difference = fit_data - observed_data
-    return difference * (inverse_covariance_matrix @ difference)
+    before_zero = int(np.floor(np.log10(np.absolute(std)))) + 1
+    three_highest_digits = int(std / 10 ** (before_zero - 3))
+    to_keep = 2  # default
+    if 100 <= three_highest_digits <= 354:
+        to_keep = 2
+    if 355 <= three_highest_digits <= 949:
+        to_keep = 1
+    if 950 <= three_highest_digits <= 999:
+        to_keep = 1  # because 1000 has 3 digits now
+        three_highest_digits = 1000
 
-
-def chi2_reduced(
-    fit_data, observed_data, covariance_matrix, weights=None, number_of_parameters=0
-):
-    r"""
-    A reduced :math:`\chi^2`, computed using modelled and observed data.
-
-    Parameters
-    ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    covariance_matrix : array_like
-        Covariance matrix of the experimental data, :math:`C \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
-    number_of_parameters : int
-        Number of parameters in the model, used for calculating the degrees of freedom.
-
-    Returns
-    -------
-    s : float
-        The reduced :math:`\chi^2`.
-
-    Notes
-    -----
-    The reduced :math:`\chi^2` is calculated using
-
-    .. math:: \bar{\chi}^2 = \frac{\chi^2}{\text{d.o.f.}} = \frac{1}{n - n_\text{par}} \sum_i \sum_j (f_i-o_i)(C^{-1}_{ij}W_{ij})(f_j-o_j).
-
-    See also
-    --------
-    dispersionrelations.utils.chi2
-    """
-    degrees_of_freedom = len(observed_data) - number_of_parameters
-    return (
-        chi2(fit_data, observed_data, covariance_matrix, weights) / degrees_of_freedom
+    std_out = round(
+        three_highest_digits * 10 ** (before_zero - 3), to_keep - before_zero
     )
+    mean_out = round(mean, to_keep - before_zero)
 
+    if mean_out % 1 == 0 and std_out % 1 == 0:
+        mean_out = int(mean_out)
+        std_out = int(std_out)
 
-def chi2_reduced_with_inverse(
-    fit_data,
-    observed_data,
-    inverse_covariance_matrix,
-    weights=None,
-    number_of_parameters=0,
-):
-    r"""
-    A reduced :math:`\chi^2`, computed using modelled and observed data.
-    This version of the function accepts the inverse of the covariance matrix
-    as a parameter and therefore gains speed by avoiding matrix inversion.
-
-    Parameters
-    ----------
-    fit_data : array_like
-        Data obtained from a model, :math:`f_i \in \{f_1, f_2, \dots, f_n\}`.
-    observed_data : array_like
-        Data obtained from an experiment, :math:`o_i \in \{o_1, o_2, \dots, o_n\}`.
-    inverse_covariance_matrix : array_like
-        Inverted covariance matrix of the experimental data, :math:`I \in \mathbb{R}^{n\times n}`.
-    weights : array_like
-        Weight matrix, used to manually attenuate parts of the data, :math:`W \in \mathbb{R}^{n\times n}`.
-    number_of_parameters : int
-        Number of parameters in the model, used for calculating the degrees of freedom.
-
-    Returns
-    -------
-    s : float
-        The reduced :math:`\chi^2`.
-
-    Notes
-    -----
-    The reduced :math:`\chi^2` is calculated using
-
-    .. math:: \bar{\chi}^2 = \frac{\chi^2}{\text{d.o.f.}} = \frac{1}{n - n_\text{par}} \sum_i \sum_j (f_i-o_i)(I_{ij}W_{ij})(f_j-o_j).
-
-    See also
-    --------
-    dispersionrelations.utils.chi2
-    """
-    degrees_of_freedom = len(observed_data) - number_of_parameters
-    return (
-        chi2_with_inverse(fit_data, observed_data, inverse_covariance_matrix, weights)
-        / degrees_of_freedom
-    )
+    return mean_out, std_out
