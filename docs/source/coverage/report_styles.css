@@ -1,0 +1,7 @@
+p.pln {
+    font-size: 5pt;
+}
+
+p.pln span.n {
+    display: none;
+}

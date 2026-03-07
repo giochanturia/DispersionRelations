@@ -1,7 +1,8 @@
 name: Dev pytest (push)
 
 on:
-  push
+  push:
+    branches: [ "dev" ]
 
 jobs:
   build:
