@@ -205,13 +205,13 @@ class SimplePoleMonomial:
         """n is a positive integer."""
         s_shifted = s - s0
         x_shifted = x - s0
-        w = s_shifted / x_shifted
 
-        result = np.log(x - s)
+        result = np.log(x - s) *s_shifted**self.n
+
         for k in range(1, self.n + 1):
-            result += 1 / k * (1 / w) ** k
+            result += 1./k * x_shifted**k * (s_shifted)**(self.n-k)
 
-        return s_shifted**self.n * result
+        return result
 
     def __indefinite_integral_ZM__(self, s, s0, x):
         """n is a negative integer."""
@@ -233,31 +233,27 @@ class SimplePoleMonomial:
 
     def __indefinite_integral_ZP_HALF__(self, s, s0, x):
         """n is a positive half-integer."""
-        s_shifted = s - s0
-        x_shifted = x - s0
-        w = s_shifted / x_shifted
-        w_sqrt = np.sqrt(w + 0j)
+        s_shifted = s - s0 + 0j
+        x_shifted = x - s0 + 0j
 
-        m = 2 * self.n
-        result = logC((w_sqrt - 1) / (w_sqrt + 1))
+        m = int(2 * self.n)
+        result = logC((np.sqrt(s_shifted) - np.sqrt(x_shifted)) / (np.sqrt(s_shifted) + np.sqrt(x_shifted))) * s_shifted**self.n 
         for k in range(1, (m + 1) // 2 + 1):
-            result += (2 / (2 * k - 1)) * (1 / w_sqrt) ** (2 * k - 1)
+            result += (2 / (2 * k - 1)) * x_shifted**( (2. * k - 1)/2. ) * s_shifted**(self.n - (2 * k - 1)/2)
 
-        return s_shifted**self.n * result
+        return result
 
     def __indefinite_integral_ZM_HALF__(self, s, s0, x):
         """n is a negative half-integer."""
-        s_shifted = s - s0
-        x_shifted = x - s0
-        w = s_shifted / x_shifted
-        w_sqrt = np.sqrt(w + 0j)
+        s_shifted = s - s0 + 0j
+        x_shifted = x - s0 + 0j
 
-        m = 2 * self.n
-        result = logC((w_sqrt - 1) / (w_sqrt + 1))
+        m = int(2 * self.n)
+        result = logC((np.sqrt(s_shifted) - np.sqrt(x_shifted)) / (np.sqrt(s_shifted) + np.sqrt(x_shifted))) * s_shifted**self.n 
         for k in range(1, (m - 1) // 2 + 1):
-            result += (2 / (2 * k - 1)) * w_sqrt ** (2 * k - 1)
+            result += (2 / (2 * k - 1)) * s_shifted**((2.*k - 1.) + self.n) / x_shifted**((2.*k - 1.)/2.)
 
-        return s_shifted**self.n * result
+        return result
 
 
 class DispersionIntegralRHC:
