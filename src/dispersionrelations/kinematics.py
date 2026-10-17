@@ -1,7 +1,30 @@
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Typing                           │
+# └──────────────────────────────────────────────────────────┘
+from __future__ import annotations  # for type hints in python==3.9
+from numpy.typing import NDArray
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
 import numpy as np
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                       KINEMATICS                         │
+# └──────────────────────────────────────────────────────────┘
 
-def Kallen(x, y, z):
+def kallen(
+    x: NDArray | complex,
+    y: NDArray | complex,
+    z: NDArray | complex,
+) -> NDArray | complex:
     r"""
     The Källén triangle function.
 
@@ -29,7 +52,11 @@ def Kallen(x, y, z):
     return x**2 + y**2 + z**2 - 2 * (x * y + y * z + z * x)
 
 
-def momentum_cms(s, M1, M2):
+def momentum_cms(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""
     The center-of-mass momentum of a two-body system.
 
@@ -37,10 +64,10 @@ def momentum_cms(s, M1, M2):
     ----------
     s : array_like
         Four-momentum squared of the two-body system.
-    M1 : float, complex
-        Mass of the first particle.
-    M2 : float, complex
-        Mass of the second particle.
+    m1_squared : float, complex
+        Squared mass of the first particle.
+    m2_squared : float, complex
+        Squared mass of the second particle.
 
     Returns
     -------
@@ -51,7 +78,7 @@ def momentum_cms(s, M1, M2):
     -----
     The CMS momentum is defined as
 
-    .. math:: q(s, M_1, M_2) = \frac{1}{2}\sqrt{\frac{\lambda(s, M_1^2, M_2^2)}{s}},
+    .. math:: q(s, M_1^2, M_2^2) = \frac{1}{2}\sqrt{\frac{\lambda(s, M_1^2, M_2^2)}{s}},
 
     where :math:`\lambda(s, M_1^2, M_2^2)` is the Källén triangle function.
 
@@ -64,7 +91,7 @@ def momentum_cms(s, M1, M2):
     >>> M2 = 0.5
     >>> E_plot = np.linspace(M1+M2, 2, 500)
     >>> s_plot = E_plot**2
-    >>> plt.plot(E_plot, momentum_cms(s_plot, M1, M2))
+    >>> plt.plot(E_plot, momentum_cms(s_plot, M1**2, M2**2))
 
     .. plot::
 
@@ -75,16 +102,20 @@ def momentum_cms(s, M1, M2):
         M2 = 0.5
         E_plot = np.linspace(M1+M2, 2, 500)
         s_plot = E_plot**2
-        plt.plot(E_plot, momentum_cms(s_plot, M1, M2))
+        plt.plot(E_plot, momentum_cms(s_plot, M1**2, M2**2))
 
     See Also
     --------
-    dispersionrelations.kinematics.Kallen
+    dispersionrelations.kinematics.kallen
     """
-    return np.sqrt(Kallen(s, M1**2, M2**2) / s + 0j) / 2
+    return np.sqrt(kallen(s, m1_squared, m2_squared) / s + 0j) / 2
 
 
-def phase_space_twobody(s, M1, M2):
+def phase_space_twobody(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""
     Phase space function for a two-particle system.
 
@@ -92,10 +123,10 @@ def phase_space_twobody(s, M1, M2):
     ----------
     s : array_like
         Four-momentum squared of the two-body system.
-    M1 : float, complex
-        Mass of the first particle.
-    M2 : float, complex
-        Mass of the second particle.
+    m1_squared : float, complex
+        Squared mass of the first particle.
+    m2_squared : float, complex
+        Squared mass of the second particle.
 
     Returns
     -------
@@ -106,7 +137,7 @@ def phase_space_twobody(s, M1, M2):
     -----
     The phase space function is defined as
 
-    .. math:: \rho(s, M_1, M_2) = \frac{1}{16\pi}\frac{2q}{\sqrt{s}} = \frac{1}{16\pi}\frac{\sqrt{\lambda(s, M_1, M_2)}}{s},
+    .. math:: \rho(s, M_1^2, M_2^2) = \frac{1}{16\pi}\frac{2q}{\sqrt{s}} = \frac{1}{16\pi}\frac{\sqrt{\lambda(s, M_1, M_2)}}{s},
 
     where :math:`q` is the CMS momentum of the particles.
 
@@ -119,7 +150,7 @@ def phase_space_twobody(s, M1, M2):
     >>> M2 = 0.5
     >>> E_plot = np.linspace(M1+M2, 2, 500)
     >>> s_plot = E_plot**2
-    >>> plt.plot(E_plot, phase_space_twobody(s_plot, M1, M2))
+    >>> plt.plot(E_plot, phase_space_twobody(s_plot, M1**2, M2**2))
 
     .. plot::
 
@@ -130,10 +161,10 @@ def phase_space_twobody(s, M1, M2):
         M2 = 0.5
         E_plot = np.linspace(M1+M2, 2, 500)
         s_plot = E_plot**2
-        plt.plot(E_plot, phase_space_twobody(s_plot, M1, M2))
+        plt.plot(E_plot, phase_space_twobody(s_plot, M1**2, M2**2))
 
     See Also
     --------
-    dispersionrelations.kinematics.momentum_cms, dispersionrelations.kinematics.Kallen
+    dispersionrelations.kinematics.momentum_cms, dispersionrelations.kinematics.kallen
     """
-    return 1 / (16 * np.pi) * np.sqrt(Kallen(s, M1**2, M2**2) / s**2 + 0j)
+    return 1 / (16 * np.pi) * np.sqrt(kallen(s, m1_squared, m2_squared) / s ** 2 + 0j)

@@ -1,11 +1,26 @@
+# This submodule is only used to generate plots within the documentation
+# No user-ended API is meant to be delivered
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
 import numpy as np
 from skimage import measure
-
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.pyplot import Axes
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                       PLOTTING                           │
+# └──────────────────────────────────────────────────────────┘
 
 plt.rcParams["figure.figsize"] = [8, 4]
 plt.rcParams["figure.dpi"] = 100
@@ -21,7 +36,7 @@ def prepare_re_im(
     im_min,
     im_max,
     im_n,
-    im_near_zero=1e-2, # relative units
+    im_near_zero=1e-2,  # relative units
     include_im_zero=True,
 ):
     z_re = np.linspace(re_min, re_max, re_n)
@@ -65,19 +80,35 @@ def figure_3x2(**figkwargs):
     return fig
 
 
-def plot_complex_ax(ax, plot_input, q_function, plotting_function = Axes.contourf, **pfkwargs):
-    return plotting_function(ax, plot_input["z_RE"], plot_input["z_IM"], q_function(plot_input["q_CP"]), **pfkwargs)
+def plot_complex_ax(
+    ax, plot_input, q_function, plotting_function=Axes.contourf, **pfkwargs
+):
+    return plotting_function(
+        ax,
+        plot_input["z_RE"],
+        plot_input["z_IM"],
+        q_function(plot_input["q_CP"]),
+        **pfkwargs,
+    )
 
 
-def plot_contourf_ax(ax, plot_input, q_function, ncontours=20, centered_around_zero=False, **pfkwargs):
-    q_current = q_function(plot_input['q_CP'])
+def plot_contourf_ax(
+    ax, plot_input, q_function, ncontours=20, centered_around_zero=False, **pfkwargs
+):
+    q_current = q_function(plot_input["q_CP"])
     q_max = np.max(q_current)
     q_min = np.min(q_current)
     if centered_around_zero:
         q_max = max(np.abs(q_max), np.abs(q_min))
         q_min = -q_max
     contour_levels = np.linspace(q_min, q_max, ncontours)
-    cf = plot_complex_ax(ax, plot_input, q_function, Axes.contourf, **dict(levels=contour_levels, **pfkwargs))
+    cf = plot_complex_ax(
+        ax,
+        plot_input,
+        q_function,
+        Axes.contourf,
+        **dict(levels=contour_levels, **pfkwargs),
+    )
     plt.gcf().colorbar(cf, ax=ax)
 
 
@@ -92,7 +123,7 @@ def plot_curve_ax2d_ax3d(ax2d, ax3d, x, y, z, **pfkwargs):
 def scatter_ax2d_ax3d(ax2d, ax3d, x, y, z, **pfkwargs):
     if ax2d is not None:
         ax2d.scatter(x, y, **pfkwargs)
-        
+
     if ax3d is not None:
         ax3d.scatter(x, y, z, **pfkwargs)
 
@@ -102,8 +133,16 @@ def plot_ray_ax2d_ax3d(ax2d, ax3d, x, y, z, **pfkwargs):
     scatter_ax2d_ax3d(ax2d, ax3d, x[:1], y[:1], z[:1], **pfkwargs)
 
 
-def plot_contours_ax2d_ax3d(ax2d, ax3d, plot_input, q_function, ncontours=20, centered_around_zero=False, **pfkwargs):
-    q_current = q_function(plot_input['q_CP'])
+def plot_contours_ax2d_ax3d(
+    ax2d,
+    ax3d,
+    plot_input,
+    q_function,
+    ncontours=20,
+    centered_around_zero=False,
+    **pfkwargs,
+):
+    q_current = q_function(plot_input["q_CP"])
     q_max = np.max(q_current)
     q_min = np.min(q_current)
     if centered_around_zero:
@@ -112,9 +151,13 @@ def plot_contours_ax2d_ax3d(ax2d, ax3d, plot_input, q_function, ncontours=20, ce
     for isovalue in np.linspace(q_min, q_max, ncontours):
         contours = measure.find_contours(q_function(plot_input["q_CP"]), isovalue)
         for contour in contours:
-            x_cont = plot_input['z_re'][0] + (plot_input['z_re'][-1] - plot_input['z_re'][0]) * contour[:,1] / (len(plot_input['z_re']) - 1)
-            y_cont = plot_input['z_im'][0] + (plot_input['z_im'][-1] - plot_input['z_im'][0]) * contour[:,0] / (len(plot_input['z_im']) - 1)
-            z_cont = q_function(plot_input['function'](x_cont + 1j * y_cont))
+            x_cont = plot_input["z_re"][0] + (
+                plot_input["z_re"][-1] - plot_input["z_re"][0]
+            ) * contour[:, 1] / (len(plot_input["z_re"]) - 1)
+            y_cont = plot_input["z_im"][0] + (
+                plot_input["z_im"][-1] - plot_input["z_im"][0]
+            ) * contour[:, 0] / (len(plot_input["z_im"]) - 1)
+            z_cont = q_function(plot_input["function"](x_cont + 1j * y_cont))
             plot_curve_ax2d_ax3d(ax2d, ax3d, x_cont, y_cont, z_cont, **pfkwargs)
 
 
@@ -139,8 +182,9 @@ per_column_default = {
         "ncontours": 24,
         "centered_around_zero": True,
         "pfkwargs": dict(cmap="Blues", norm=colors.Normalize(vmin=0)),
-    }
+    },
 }
+
 
 def complex_plot_contours(plot_input, per_column=None):
     fig = figure_3x2(figsize=(10, 6))
@@ -150,14 +194,37 @@ def complex_plot_contours(plot_input, per_column=None):
 
     for col in per_column.keys():
         pc = per_column[col]
-        fig.axes[col].set_title(pc['title'])
-        plot_contourf_ax(fig.axes[col], plot_input, pc["q_function"], ncontours=pc["ncontours"], centered_around_zero=pc["centered_around_zero"], **pc["pfkwargs"])
-        plot_complex_ax(fig.axes[3 + col], plot_input, pc["q_function"], Axes3D.plot_surface, **pc["pfkwargs"])
-        plot_contours_ax2d_ax3d(fig.axes[col], fig.axes[3 + col], plot_input, pc["q_function"], ncontours=pc["ncontours"], centered_around_zero=pc["centered_around_zero"], c='white', alpha=0.3, lw=1)
+        fig.axes[col].set_title(pc["title"])
+        plot_contourf_ax(
+            fig.axes[col],
+            plot_input,
+            pc["q_function"],
+            ncontours=pc["ncontours"],
+            centered_around_zero=pc["centered_around_zero"],
+            **pc["pfkwargs"],
+        )
+        plot_complex_ax(
+            fig.axes[3 + col],
+            plot_input,
+            pc["q_function"],
+            Axes3D.plot_surface,
+            **pc["pfkwargs"],
+        )
+        plot_contours_ax2d_ax3d(
+            fig.axes[col],
+            fig.axes[3 + col],
+            plot_input,
+            pc["q_function"],
+            ncontours=pc["ncontours"],
+            centered_around_zero=pc["centered_around_zero"],
+            c="white",
+            alpha=0.3,
+            lw=1,
+        )
 
     for ax in fig.axes[:3]:
-        ax.axhline(0, c='white', alpha=0.1)
-        ax.axvline(0, c='white', alpha=0.1)
+        ax.axhline(0, c="white", alpha=0.1)
+        ax.axvline(0, c="white", alpha=0.1)
         ax.set_aspect(1)
 
     fig.tight_layout()

@@ -1,16 +1,54 @@
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Typing                           │
+# └──────────────────────────────────────────────────────────┘
+from __future__ import annotations  # for type hints in python==3.9
+
+from functools import partial
+from typing import Callable, Literal, Protocol
+from typing_extensions import override
+from numpy.typing import NDArray
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
 from abc import ABC, abstractmethod
 import warnings
-from typing import Union, Optional  # for python<=3.9
-
 import numpy as np
 from scipy.interpolate import interp1d
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                    Internal imports                      │
+# └──────────────────────────────────────────────────────────┘
+from dispersionrelations.complex import Complex2RS
+from dispersionrelations.domains import DomainedFunctionCollection, DomainedFunction
+from dispersionrelations.interpolation import ComplexInterpolator
 from dispersionrelations.constants import GeV, alpha_fs, E_almost_zero
-from dispersionrelations.kinematics import phase_space_twobody
-from dispersionrelations.integrals import DispersionIntegralRHC, integrate_gl
+from dispersionrelations.kinematics import phase_space_twobody, kallen
+from dispersionrelations.integrals import (
+    # split_intervals_evenly,
+    # split_intervals_logarithmically,
+    # integrate_intervals_partially_gl,
+    DispersionIntegralRHC,
+    integrate_gl,
+    disp_int_to_complex_2RS,
+)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                        DYNAMICS                          │
+# └──────────────────────────────────────────────────────────┘
 
 
-def sR(M_R, G_R):
+def s_pole(
+    M_R: float,
+    G_R: float,
+) -> complex:
     r"""
     Resonance pole location calculated from its mass and width.
 
@@ -23,7 +61,7 @@ def sR(M_R, G_R):
 
     Returns
     -------
-    sR : complex
+    s_pole : complex
         The complex pole location.
 
     Notes
@@ -33,8 +71,26 @@ def sR(M_R, G_R):
     return (M_R - 1j * G_R / 2) ** 2
 
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                 DYNAMICS: VERTEX FUNCTIONS               │
+# └──────────────────────────────────────────────────────────┘
 
-def vertex_VPP__2(s, mP, mP_2=None):
+
+class VertexFunction(Protocol):
+    def __call__(
+        self,
+        s: NDArray | complex,
+        m1_squared: NDArray | complex,
+        m2_squared: NDArray | complex,
+    ) -> NDArray | complex:
+        pass
+
+
+def vertex_squared_vpp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` pseudoscalar–pseudoscalar vertex squared.
 
     Parameters
@@ -42,11 +98,11 @@ def vertex_VPP__2(s, mP, mP_2=None):
     s : array_like
         Kinematic variable (can be complex).
 
-    mP : float
+    m1_squared : complex
         Mass of the pseudoscalar with momentum :math:`p_1`.
 
-    mP_2 : float
-        Mass of the pseudoscalar with momentum :math:`p_2` (if not passed, a case with equal masses will be returned).
+    m2_squared : complex
+        Mass of the pseudoscalar with momentum :math:`p_2`.
 
     Returns
     -------
@@ -60,7 +116,7 @@ def vertex_VPP__2(s, mP, mP_2=None):
     .. math::
         \hat{\beta}_{VPP}^{\mu}(q,p_1,p_2) \propto (p_1 - p_2)^{\mu}.
 
-    Spin-averaged vertex function 
+    Spin-averaged vertex function
 
     .. math::
         \beta_{VPP}^2(q^2, p_1^2, p_2^2) = \frac{\lambda(q^2, p_1^2, p_2^2)}{q^2} .
@@ -68,12 +124,16 @@ def vertex_VPP__2(s, mP, mP_2=None):
     The function returns :math:`\beta_{VPP}^2(s, m_{P1}^2, m_{P2}^2)/3`,
     where :math:`3=(2l+1)` corresponds to the P-wave :math:`(l=1)`.
     """
-    if mP_2 is None:
-        return 1 / 3 * (s - 4 * mP**2)
-    return 1 / 3 * (s - (mP + mP_2) ** 2) * (s - (mP - mP_2) ** 2) / s
+    # if m1_squared == m2_squared:
+    #     return 1 / 3 * (s - 4 * m1_squared)
+    return 1 / 3 * kallen(s, m1_squared, m2_squared) / s
 
 
-def vertex_VPP(s, mP, mP_2=None):
+def vertex_vpp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` pseudoscalar–pseudoscalar vertex.
 
     Parameters
@@ -81,10 +141,10 @@ def vertex_VPP(s, mP, mP_2=None):
     s : array_like
         Kinematic variable (can be complex).
 
-    mP : float
+    m1_squared : complex
         Mass of the pseudoscalar with momentum :math:`p_1`.
 
-    mP_2 : float
+    m2_squared : complex
         Mass of the pseudoscalar with momentum :math:`p_2` (if not passed, a case with equal masses will be returned).
 
     Returns
@@ -94,13 +154,17 @@ def vertex_VPP(s, mP, mP_2=None):
 
     Notes
     -----
-    This returns the square root of :func:`vertex_VPP__2`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VPP}(s, m_{P1}^2, m_{P2}^2)`.
+    This returns the square root of :func:`vertex_squared_vpp`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VPP}(s, m_{P1}^2, m_{P2}^2)`.
     For most applications we need the squared version.
     """
-    return np.sqrt(vertex_VPP__2(s, mP, mP_2) + 0j)
+    return np.sqrt(vertex_squared_vpp(s, m1_squared, m2_squared) + 0j)
 
 
-def vertex_VVP__2(s, mV, mP):
+def vertex_squared_vvp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` vector–pseudoscalar vertex squared.
 
     Parameters
@@ -108,10 +172,10 @@ def vertex_VVP__2(s, mV, mP):
     s : array_like
         Kinematic variable (can be complex).
 
-    mV : float
+    m1_squared : float
         Mass of the vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -126,7 +190,7 @@ def vertex_VVP__2(s, mV, mP):
     .. math::
         \hat{\beta}_{VVP}^{(\lambda)\mu}(q, k, p) = \epsilon^{\mu\nu\alpha\beta} n^{(\lambda)}_\nu p_\alpha q_\beta .
 
-    Spin-averaged vertex function 
+    Spin-averaged vertex function
 
     .. math::
         \beta_{VVP}^2(q^2, k^2, p^2) = \frac{\lambda(q^2, k^2, p^2)}{2} .
@@ -134,10 +198,14 @@ def vertex_VVP__2(s, mV, mP):
     The function returns :math:`\beta_{VVP}^2(s, m_V^2, m_P^2)/3`,
     where :math:`3=(2l+1)` corresponds to the P-wave :math:`(l=1)`.
     """
-    return 1 / 6 * (s - (mV - mP) ** 2) * (s - (mV + mP) ** 2)
+    return 1 / 6 * kallen(s, m1_squared, m2_squared)
 
 
-def vertex_VVP(s, mV, mP):
+def vertex_vvp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` vector–pseudoscalar vertex.
 
     Parameters
@@ -145,10 +213,10 @@ def vertex_VVP(s, mV, mP):
     s : array_like
         Kinematic variable (can be complex).
 
-    mV : float
+    m1_squared : float
         Mass of the vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -158,13 +226,17 @@ def vertex_VVP(s, mV, mP):
 
     Notes
     -----
-    This returns the square root of :func:`vertex_VVP__2`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VVP}(s, m_V^2, m_P^2)`.
+    This returns the square root of :func:`vertex_squared_vvp`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VVP}(s, m_V^2, m_P^2)`.
     For most applications we need the squared version.
     """
-    return np.sqrt(vertex_VVP__2(s, mV, mP) + 0j)
+    return np.sqrt(vertex_squared_vvp(s, m1_squared, m2_squared) + 0j)
 
 
-def vertex_AVP__2(s, mV, mP):
+def vertex_squared_avp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""An axial vector :math:`\to` vector–pseudoscalar vertex squared.
 
     Parameters
@@ -172,10 +244,10 @@ def vertex_AVP__2(s, mV, mP):
     s : array_like
         Kinematic variable (can be complex).
 
-    mV : float
+    m1_squared : float
         Mass of the vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -190,17 +262,21 @@ def vertex_AVP__2(s, mV, mP):
     .. math::
         \hat{\beta}_{AVP}^{(\lambda)\mu}(q, k, p) = (q \cdot k) \, n^{(\lambda)\mu} - (n^{(\lambda)} \cdot q) \, k^\mu .
 
-    Spin-averaged vertex function 
+    Spin-averaged vertex function
 
     .. math::
         \beta_{AVP}^2(q^2, k^2, p^2) = 3q^2k^2 + \frac{\lambda(q^2, k^2, p^2)}{2} .
 
     The function returns :math:`\beta_{AVP}^2(s, m_V^2, m_P^2)/3`.
     """
-    return 1 / 6 * (2 * s * mV**2 + (s + mV**2 - mP**2) ** 2)
+    return s * m1_squared + 1 / 6 * kallen(s, m1_squared, m2_squared)
 
 
-def vertex_AVP(s, mV, mP):
+def vertex_avp(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""An axial vector :math:`\to` vector–pseudoscalar vertex.
 
     Parameters
@@ -208,10 +284,10 @@ def vertex_AVP(s, mV, mP):
     s : array_like
         Kinematic variable (can be complex).
 
-    mV : float
+    m1_squared : float
         Mass of the vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -221,13 +297,17 @@ def vertex_AVP(s, mV, mP):
 
     Notes
     -----
-    This returns the square root of :func:`vertex_AVP__2`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{AVP}(s, m_V^2, m_P^2)`.
+    This returns the square root of :func:`vertex_squared_avp`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{AVP}(s, m_V^2, m_P^2)`.
     For most applications we need the squared version.
     """
-    return np.sqrt(vertex_AVP__2(s, mV, mP) + 0j)
+    return np.sqrt(vertex_squared_avp(s, m1_squared, m2_squared) + 0j)
 
 
-def vertex_VAP__2(s, mA, mP):
+def vertex_squared_vap(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` axial vector–pseudoscalar vertex squared.
 
     Parameters
@@ -238,7 +318,7 @@ def vertex_VAP__2(s, mA, mP):
     mV : float
         Mass of the axial vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -253,17 +333,21 @@ def vertex_VAP__2(s, mA, mP):
     .. math::
         \hat{\beta}_{VAP}^{(\lambda)\mu}(q, k, p) = (q \cdot k) \, n^{(\lambda)\mu} - (n^{(\lambda)} \cdot q) \, k^\mu .
 
-    Spin-averaged vertex function 
+    Spin-averaged vertex function
 
     .. math::
         \beta_{VAP}^2(q^2, k^2, p^2) = 3q^2k^2 + \frac{\lambda(q^2, k^2, p^2)}{2} .
 
     The function returns :math:`\beta_{VAP}^2(s, m_A^2, m_P^2)/3`.
     """
-    return 1 / 6 * (2 * s * mA**2 + (s + mA**2 - mP**2) ** 2)
+    return s * m1_squared + 1 / 6 * kallen(s, m1_squared, m2_squared)
 
 
-def vertex_VAP(s, mA, mP):
+def vertex_vap(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` axial vector–pseudoscalar vertex.
 
     Parameters
@@ -274,7 +358,7 @@ def vertex_VAP(s, mA, mP):
     mV : float
         Mass of the axial vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -284,13 +368,17 @@ def vertex_VAP(s, mA, mP):
 
     Notes
     -----
-    This returns the square root of :func:`vertex_VAP__2`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VAP}(s, m_A^2, m_P^2)`.
+    This returns the square root of :func:`vertex_squared_vap`, i.e. :math:`\frac{1}{\sqrt{3}}\beta_{VAP}(s, m_A^2, m_P^2)`.
     For most applications we need the squared version.
     """
-    return np.sqrt(vertex_VAP__2(s, mA, mP) + 0j)
+    return np.sqrt(vertex_squared_vap(s, m1_squared, m2_squared) + 0j)
 
 
-def vertex_VAP_T1__2(s, mA, mP):
+def vertex_squared_vap_t1(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` axial vector–pseudoscalar vertex squared.
 
     Parameters
@@ -301,7 +389,7 @@ def vertex_VAP_T1__2(s, mA, mP):
     mV : float
         Mass of the axial vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -312,7 +400,11 @@ def vertex_VAP_T1__2(s, mA, mP):
     return s / 3
 
 
-def vertex_VAP_T2__2(s, mA, mP):
+def vertex_squared_vap_t2(
+    s: NDArray | complex,
+    m1_squared: NDArray | complex,
+    m2_squared: NDArray | complex,
+) -> NDArray | complex:
     r"""A vector :math:`\to` axial vector–pseudoscalar vertex squared.
 
     Parameters
@@ -323,7 +415,7 @@ def vertex_VAP_T2__2(s, mA, mP):
     mV : float
         Mass of the axial vector with momentum :math:`k`.
 
-    mP : float
+    m2_squared : float
         Mass of the pseudoscalar with momentum :math:`p`.
 
     Returns
@@ -334,9 +426,26 @@ def vertex_VAP_T2__2(s, mA, mP):
     return 1 / 6 + s * 0
 
 
-def taming_BlattWeisskopf(
-    s, sthr: float, sB: float, l: int = 1, normalize_at_sB: bool = False
-):
+# ┌──────────────────────────────────────────────────────────┐
+# │                  DYNAMICS: TAMING FACTORS                │
+# └──────────────────────────────────────────────────────────┘
+
+
+class TamingFactor(Protocol):
+    def __call__(
+        self,
+        s: NDArray | complex,
+    ) -> NDArray | complex:
+        pass
+
+
+def taming_blatt_weisskopf(
+    s: NDArray | complex,
+    sthr: float,
+    sB: float,
+    l: int = 1,
+    normalize_at_sB: bool = False,
+) -> NDArray | complex:
     r"""
     Blatt–Weisskopf taming factors.
 
@@ -370,16 +479,17 @@ def taming_BlattWeisskopf(
 
     .. math::
 
-        \begin{align}
+        \begin{aligned}
         B_0(s) &= 1, \\
         B_1(s) &= 1 / (x + 1), \\
         B_2(s) &= 1 / ((x-3)^2 + 9x), \\
-        \end{align}
+        \end{aligned}
 
     where :math:`x=(s-s_{thr}) / (s_B - s_{thr})`.
     """
     if l == 0:
-        return 1
+        # return 1
+        return np.ones_like(s)
     elif l == 1:
         x = (s - sthr) / (sB - sthr)
         numerator = 2 * x if normalize_at_sB else 1
@@ -388,21 +498,25 @@ def taming_BlattWeisskopf(
         x = (s - sthr) / (sB - sthr)
         numerator = 13 * x**2 if normalize_at_sB else 1
         return numerator / ((x - 3) ** 2 + 9 * x)
-    elif l == 3:
-        x = (s - sthr) / (sB - sthr)
-        numerator = 277 * x**3 if normalize_at_sB else 1
-        return numerator / (x * (x - 15) ** 2 + 9 * (2 * x - 5))
-    elif l == 4:
-        x = (s - sthr) / (sB - sthr)
-        numerator = 12746 * x**4 if normalize_at_sB else 1
-        return numerator / ((x**2 - 45 * x + 105) ** 2 + 25 * x * (2 * x - 21) ** 2)
+    # elif l == 3:  # THIS CASE SEEMS TO BE WRONG IN THE PAPER THIS IS FROM
+    #     x = (s - sthr) / (sB - sthr)
+    #     numerator = 277 * x**3 if normalize_at_sB else 1
+    #     return numerator / (x * (x - 15) ** 2 + 9 * (2 * x - 5))
+    # elif l == 4:
+    #     x = (s - sthr) / (sB - sthr)
+    #     numerator = 12746 * x**4 if normalize_at_sB else 1
+    #     return numerator / ((x**2 - 45 * x + 105) ** 2 + 25 * x * (2 * x - 21) ** 2)
     else:
         raise NotImplementedError(
             f"Blatt-Weisskopf factor for l={l} has not been implemented."
         )
 
 
-def taming_spacelike_pole(s, sB: float = (2 * GeV) ** 2, n: int = 1):
+def taming_spacelike_pole(
+    s: NDArray | complex,
+    sB: float = (2 * GeV) ** 2,
+    n: int = 1,
+) -> NDArray | complex:
     r"""
     A simple decaying function, used as a taming factor.
 
@@ -426,12 +540,16 @@ def taming_spacelike_pole(s, sB: float = (2 * GeV) ** 2, n: int = 1):
 
     .. math:: B_n(s) = \left( \frac{s_B}{s_B + s} \right)^n .
 
-    This creates a space-like pole (of degree `n`) at :math:`s = -s_B`.
+    This creates a space-like pole of degree `n` at :math:`s = -s_B`.
     """
     return (sB / (sB + s)) ** n
 
 
-def BreitWigner(s, mass: float, width: float):
+def breit_wigner(
+    s: NDArray | complex,
+    mass: float,
+    width: float,
+) -> NDArray | complex:
     r"""
     Breit–Wigner distribution.
 
@@ -461,7 +579,12 @@ def BreitWigner(s, mass: float, width: float):
     return 1 / (s - mass**2 + 1j * mass * width)
 
 
-def BreitWignerED(s, mass: float, width_s: callable, width_0: float):
+def breit_wigner_energy_dependent(
+    s: NDArray | complex,
+    mass: float,
+    width_s: Callable,
+    width_0: float,
+) -> NDArray | complex:
     r"""
     Breit–Wigner distribution.
 
@@ -493,17 +616,21 @@ def BreitWignerED(s, mass: float, width_s: callable, width_0: float):
 
     See Also
     --------
-    dispersionrelations.kinematics.BreitWigner
+    dispersionrelations.kinematics.breit_wigner
     """
     return 1 / (s - mass**2 + 1j * mass * width_s(s, mass, width_0))
 
 
-def radiative_width_to_normalisation_squared(width, mV, mP):
+def vector_pseudoscalar_normalisation_squared(
+    radiative_width: float,
+    mV: float,
+    mP: float,
+) -> float:
     r"""Computes the vector–pseudoscalar form factor normalisation squared from the radiative width of the vector particle.
 
     Parameters
     ----------
-    width : float
+    radiative_width : float
         Radiative width of the vector particle.
     mV : float
         Mass of the vector particle.
@@ -521,19 +648,24 @@ def radiative_width_to_normalisation_squared(width, mV, mP):
     The radiative width :math:`\Gamma` is connected to the form factor normalisation :math:`|f(0)|` via
 
     .. math:: \Gamma_{V \rightarrow P\gamma} = \frac{\alpha(M_V^2 - M_P^2)^3}{24 M_V^3} |f_{VP}(0)|^2.
-    
+
     """
-    return width / ((alpha_fs / 24) * ((mV**2 - mP**2) / mV) ** 3)
+    return radiative_width / ((alpha_fs / 24) * ((mV**2 - mP**2) / mV) ** 3)
 
 
-def radiative_width_to_normalisation_squared_error(
-    width, mV, mP, width_std, mV_std, mP_std
-):
+def vector_pseudoscalar_normalisation_squared_error(
+    radiative_width: float,
+    mV: float,
+    mP: float,
+    radiative_width_std: float,
+    mV_std: float,
+    mP_std: float,
+) -> float:
     r"""Computes the error of the vector–pseudoscalar form factor normalisation squared from the radiative width of the vector particle.
 
     Parameters
     ----------
-    width, width_std : float
+    radiative_width, radiative_width_std : float
         Radiative width of the vector particle (and the corresponding error).
     mV, mV_std : float
         Mass of the vector particle (and the corresponding error).
@@ -554,16 +686,76 @@ def radiative_width_to_normalisation_squared_error(
     """
     jacobian_width = 1 / ((alpha_fs / 24) * ((mV**2 - mP**2) / mV) ** 3)
     jacobian_mV = (
-        3 * width * mV**2 * (mP**2 + mV**2) / (alpha_fs * (mV**2 - mP**2) ** 4)
+        3
+        * radiative_width
+        * mV**2
+        * (mP**2 + mV**2)
+        / (alpha_fs * (mV**2 - mP**2) ** 4)
     )
-    jacobian_mP = 6 * width * mP * mV**3 / (alpha_fs * (mV**2 - mP**2) ** 4)
+    jacobian_mP = 6 * radiative_width * mP * mV**3 / (alpha_fs * (mV**2 - mP**2) ** 4)
     return np.sqrt(
-        (jacobian_width * width_std) ** 2
+        (jacobian_width * radiative_width_std) ** 2
         + (jacobian_mV * mV_std) ** 2
         + (jacobian_mP * mP_std) ** 2
     )
 
 
+class OmnesFunction(DispersionIntegralRHC):
+    r"""
+    Omnès–Muskhelishvili solution :cite:`Omnes:1958hv`.
+
+    Parameters
+    ----------
+    integrand : Callable
+        Integrand along the RHC.
+    threshold : float
+        Lower boundary of the integral.
+    infinity : float, optional
+        Upper boundary of the integral in the units of :code:`threshold`.
+    integration_split_points : array_like, optional
+        Integration split points in the units of :code:`threshold`.
+    integration_order : int, optional
+        Gauss–Legendre quadrature order.
+    subtraction_point : float, optional
+        Point :math:`s_0` of subtraction.
+    subtraction_constants : array_like, optional
+        Array of :math:`f_i` subtraction constants. Defines subtraction level :math:`n`.
+
+    Notes
+    -----
+    The function is defined as
+
+    .. math:: \Omega(s) = \exp\left(\sum_{i=0}^{n-1}f_i (s-s_0)^i + \frac{(s-s_0)^n}{\pi}\int_{s_{thr}}^{\infty}\frac{\delta(x) \, dx}{(x-s_0)^n(x-s-i\epsilon)}\right),
+
+    where :math:`s_0` is the subtraction point, :math:`f_i` are the subtraction constants for :math:`\log\Omega`,
+    :math:`n` is the subtraction level, and
+    :math:`\delta` is the input phase, passed as `integrand`.
+
+    See Also
+    --------
+    dispersionrelations.integrals.DispersionIntegralRHC
+    """
+
+    @override
+    def __call__(
+        self,
+        s: NDArray | complex,
+    ) -> NDArray | complex:
+        r"""
+        Parameters
+        ----------
+        s : array_like
+            Four-momentum squared of the propagating particle.
+
+        Returns
+        -------
+        Ω : array_like
+            The same shape as input `s`.
+        """
+        return np.exp(super().__call__(s))
+
+
+# TODO refactor and drop the inheritance from DispersionIntegralRHC
 class Channel(DispersionIntegralRHC, ABC):
     r"""
     Dispersive representation of a channel.
@@ -633,7 +825,10 @@ class Channel(DispersionIntegralRHC, ABC):
             subtraction_constants,
         )
 
-    def loop_discontinuity(self, s):
+    def loop_discontinuity(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         Discontinuity of the two-body channel self-energy.
 
@@ -649,8 +844,8 @@ class Channel(DispersionIntegralRHC, ABC):
 
         Notes
         -----
-        
-        We assume the Schwarz reflection principle and therefore,
+
+        We assume the schwarz_reflection reflection principle and therefore,
 
         .. math::
             \mathrm{Disc}(\Pi(s)) = 2i \, \mathrm{Im}(\Pi(s)) \, .
@@ -662,7 +857,11 @@ class Channel(DispersionIntegralRHC, ABC):
         )
         return result_up + result_down
 
-    def loop(self, s, sheet=1):
+    def loop(
+        self,
+        s: NDArray,
+        sheet: Literal[1, 2] = 1,
+    ) -> NDArray:
         r"""
         Invokes the :code:`__call__` method of the parent class,
         with an added functionality of switching to the second sheet.
@@ -686,24 +885,25 @@ class Channel(DispersionIntegralRHC, ABC):
         return result
 
     @abstractmethod
-    def phase_space_function(self, s):
+    def phase_space_function(self, s: NDArray) -> NDArray:
         return None
 
     @abstractmethod
-    def vertex_function_squared(self, s):
+    def vertex_function_squared(self, s: NDArray) -> NDArray:
         return None
 
     @abstractmethod
-    def taming_factor_squared(self, s):
+    def taming_factor_squared(self, s: NDArray) -> NDArray:
         return None
 
-    def vertex_function(self, s):
+    def vertex_function(self, s: NDArray) -> NDArray:
         return np.sqrt(self.vertex_function_squared(s) + 0j)
 
-    def taming_factor(self, s):
+    def taming_factor(self, s: NDArray) -> NDArray:
         return np.sqrt(self.taming_factor_squared(s) + 0j)
 
 
+# TODO this class will be redundant after interpolated complex functions are finalized
 class PrecomputedChannel(Channel):
     def __init__(self, s_values, integrand_values, threshold, **kwargs):
         self.last_s = s_values[-1]
@@ -733,6 +933,55 @@ class PrecomputedChannel(Channel):
 
     def taming_factor_squared(self, s):
         return 0 * s + 1
+
+
+# TODO this class will be redundant after interpolated complex functions are finalized
+class InterpolatedChannel(Channel):
+    def __init__(
+        self,
+        channel: Channel,
+        loop_1: ComplexInterpolator,
+        loop_2: ComplexInterpolator,
+    ):
+        self._channel = channel
+        self.threshold = self._channel.threshold
+        self.integrand = self._channel.integrand
+        self._loop_1 = loop_1
+        self._loop_2 = loop_2
+
+    def __getattr__(self, name):
+        return getattr(self._channel, name)
+
+    def loop_from_interpolation(self, s, sheet=1):
+        if sheet == 1:
+            return self._loop_1(s)
+        if sheet == 2:
+            return self._loop_2(s)
+        raise ValueError(f"Invalid sheet number: {sheet}. Only 1 and 2 are allowed.")
+
+    @override
+    def loop(self, s, sheet=1, fallback_to_channel_loop=True):
+        result = self.loop_from_interpolation(s, sheet)
+        if fallback_to_channel_loop and np.any(np.isnan(result)):
+            warnings.warn(
+                f"Interpolation returned NaN for {np.sum(np.isnan(result))} values. Falling back to the original channel loop for those values."
+            )
+            mask = np.isnan(result)
+            result[mask] = self._channel.loop(s[mask], sheet=sheet)
+        return result
+
+    @override
+    def loop_discontinuity(self, s):
+        return self.loop(s, sheet=1) - self.loop(s, sheet=2)
+
+    def phase_space_function(self, s):
+        return self._channel.phase_space_function(s)
+
+    def vertex_function_squared(self, s):
+        return self._channel.vertex_function_squared(s)
+
+    def taming_factor_squared(self, s):
+        return self._channel.taming_factor_squared(s)
 
 
 class StableTwoBodyChannel(Channel):
@@ -768,7 +1017,7 @@ class StableTwoBodyChannel(Channel):
         self,
         m1,
         m2,
-        vertex_function_squared=vertex_VPP__2,
+        vertex_function_squared=vertex_squared_vpp,
         taming_factor_squared=lambda s: taming_spacelike_pole(s) ** 2,
         **kwargs,
     ):
@@ -781,8 +1030,8 @@ class StableTwoBodyChannel(Channel):
         self.__vfs__ = np.vectorize(lambda s: vertex_function_squared(s, m1, m2))
         self.__tfs__ = np.vectorize(lambda s: taming_factor_squared(s))
         # Construct the integrand and call the parent constructor:
-        loop_integrand = (
-            lambda s: self.phase_space_function(s)
+        loop_integrand = lambda s: (
+            self.phase_space_function(s)
             * self.vertex_function_squared(s)
             * self.taming_factor_squared(s)
         )
@@ -810,7 +1059,7 @@ class UnstableParticle:
         as long as it has a :code:`threshold` and
         functions :code:`integrand` and :code:`loop`.
     pole_location : complex
-        Location of the resonance pole (see :func:`sR`).
+        Location of the resonance pole (see :func:`dispersionrelations.constants.s_pole`).
     pole_sheet : int
         Riemann sheet of the decay channel, on which the resonance lives.
         For above-threshold resonances, the typical sheet is `2`.
@@ -828,18 +1077,13 @@ class UnstableParticle:
         decay_channel: Channel,
         pole_location: complex,
         pole_sheet: int = 2,
-        mass_and_coupling: Optional[tuple] = None,
-        interpolation_points=[1, 2, 5, 1e1, 5e1, 1e2, 1e3, 1e5, 1e8],
-        interpolation_density=1000,
+        mass_and_coupling: tuple[float, float] | None = None,
     ):
         self.decay_channel = decay_channel
         self.sp = pole_location
         self.pole_sheet = pole_sheet
         self.mass_and_coupling = mass_and_coupling
         self.__calculate_m_g__()
-        self.interpolation_points = interpolation_points
-        self.interpolation_density = interpolation_density
-        self.__interpolate_spectral_function__()
 
     def __calculate_m_g__(self):
         if self.mass_and_coupling is not None:
@@ -852,13 +1096,17 @@ class UnstableParticle:
         self.g = np.sqrt(-np.imag(self.sp) / np.imag(loop_at_the_pole))
         self.m = np.sqrt(np.real(self.sp) + self.g**2 * np.real(loop_at_the_pole))
 
-    def propagator(self, s, sheet=1):
+    def propagator(
+        self,
+        s: NDArray,
+        sheet: Literal[1, 2] = 1,
+    ) -> NDArray:
         r"""
         Propagator of the unstable particle.
 
         Parameters
         ----------
-        
+
         s : array_like
             Four-momentum squared of the propagating particle.
         sheet : int, optional
@@ -881,13 +1129,16 @@ class UnstableParticle:
         """
         return 1 / (s - self.m**2 + self.g**2 * self.decay_channel.loop(s, sheet))
 
-    def spectral_function_CP(self, s):
+    def spectral_function_CP(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         Spectral function of the unstable particle for :math:`s\in\mathbb{C}`.
 
         Parameters
         ----------
-        
+
         s : array_like
             Four-momentum squared of the propagating particle.
 
@@ -904,17 +1155,91 @@ class UnstableParticle:
         .. math:: \sigma(s) = \frac{1}{\pi} G^{I}(s) G^{II}(s) \, g^2 \mathrm{Im}(\Pi(s)) \, ,
 
         which, for real :math:`s` reduces to
-        
+
         .. math:: \sigma(s\in\mathbb{R}) = -\frac{1}{\pi} \mathrm{Im}(G(s)) \, .
         """
         return (
             1
-            / np.pi
+            / (2j * np.pi)
             * self.propagator(s, sheet=1)
             * self.propagator(s, sheet=2)
             * self.g**2
+            * self.decay_channel.loop_discontinuity(s)
+        )
+
+    def spectral_function_RE(
+        self,
+        s: NDArray,
+    ) -> NDArray:
+        r"""
+        Spectral function of the unstable particle for :math:`s\in\mathbb{R}`.
+
+        Parameters
+        ----------
+
+        s : array_like
+            Four-momentum squared of the propagating particle.
+
+        Returns
+        -------
+        σ : array_like
+            The same shape as input `s`.
+
+        Notes
+        -----
+
+        The spectral function is defined as
+
+        .. math:: \sigma(s) = -\frac{1}{\pi} \mathrm{Im}(G(s)) \, .
+        """
+        return (
+            1
+            / np.pi
+            * np.abs(self.propagator(s)) ** 2
+            * self.g**2
             * self.decay_channel.integrand(s)
         )
+
+
+# TODO this class will be redundant after interpolated complex functions are finalized
+class UnstableParticleInterpolated(UnstableParticle):
+    r"""
+    Unstable particle.
+
+    Parameters
+    ----------
+    decay_channel : TwoBodyChannel
+        A channel that the particle decays into.
+        The channel does not need to be two-body,
+        as long as it has a :code:`threshold` and
+        functions :code:`integrand` and :code:`loop`.
+    pole_location : complex
+        Location of the resonance pole (see :func:`dispersionrelations.constants.s_pole`).
+    pole_sheet : int
+        Riemann sheet of the decay channel, on which the resonance lives.
+        For above-threshold resonances, the typical sheet is `2`.
+    mass_and_coupling : (float, float)
+        Bare mass and the coupling constant, parameters of the propagator.
+        If passed, :code:`pole_location` is ignored.
+    interpolation_points : list
+        Intervals to use for interpolating the spectral function.
+    interpolation_density : int
+        Number of points per interpolation interval.
+    """
+
+    def __init__(
+        self,
+        decay_channel: Channel,
+        pole_location: complex,
+        pole_sheet: int = 2,
+        mass_and_coupling: tuple | None = None,
+        interpolation_points=[1, 2, 5, 1e1, 5e1, 1e2, 1e3, 1e5, 1e8],
+        interpolation_density=1000,
+    ):
+        super().__init__(decay_channel, pole_location, pole_sheet, mass_and_coupling)
+        self.interpolation_points = interpolation_points
+        self.interpolation_density = interpolation_density
+        self.__interpolate_spectral_function__()
 
     def __interpolate_spectral_function__(self):
         s_interpolation = np.concatenate(
@@ -933,13 +1258,17 @@ class UnstableParticle:
             [self.decay_channel.threshold, *s_interpolation], [0, *sf_interpolation]
         )
 
-    def spectral_function_RE(self, s):
+    @override
+    def spectral_function_RE(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         Spectral function of the unstable particle for :math:`s\in\mathbb{R}`.
 
         Parameters
         ----------
-        
+
         s : array_like
             Four-momentum squared of the propagating particle.
 
@@ -970,6 +1299,7 @@ class UnstableParticle:
         return result
 
 
+# TODO interpolation should not be the responsibility of this class
 class SemiStableTwoBodyCut:
     r"""
     Two-body channel with one unstable particle and one spectator.
@@ -1003,7 +1333,7 @@ class SemiStableTwoBodyCut:
         vertex_function_squared: callable,
         gl_order: int = 100,
         split_n: int = 3,
-        integration_split_points: list[float] = [2, 5, 10, 50, 100],
+        integration_split_points: list[float] = [2, 3, 5, 10, 50, 100],
         interpolation_points: list = [
             1,
             2,
@@ -1038,7 +1368,11 @@ class SemiStableTwoBodyCut:
         self.interpolation_density = interpolation_density
         self.__interpolate_ImPI_integral__()
 
-    def ImPI_integrand_RE(self, s, x):
+    def ImPI_integrand_RE(
+        self,
+        s: NDArray,
+        x: NDArray,
+    ) -> NDArray:
         r"""
         Integrand for the :math:`\mathrm{Im}(\Pi(s))` spectral integral for :math:`x\in\mathbb{R}`.
 
@@ -1069,7 +1403,11 @@ class SemiStableTwoBodyCut:
             * self.vertex_function_squared(s, np.sqrt(x + 0j), self.spectator_mass)
         )
 
-    def ImPI_integrand_CP(self, s, x):
+    def ImPI_integrand_CP(
+        self,
+        s: NDArray,
+        x: NDArray,
+    ) -> NDArray:
         r"""
         Integrand for the :math:`\mathrm{Im}(\Pi(s))` spectral integral for :math:`x\in\mathbb{C}`.
 
@@ -1100,7 +1438,10 @@ class SemiStableTwoBodyCut:
             * self.vertex_function_squared(s, np.sqrt(x + 0j), self.spectator_mass)
         )
 
-    def ImPI_integral(self, s):
+    def ImPI_integral(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         The :math:`\mathrm{Im}(\Pi(s))` spectral integral.
 
@@ -1166,8 +1507,8 @@ class SemiStableTwoBodyCut:
 
         integral_2 = integrate_gl(
             integrand,
-            lower_bound,
             middle_bound,
+            upper_bound,
             order=self.gl_order,
             split_n=self.split_n,
         )
@@ -1175,11 +1516,15 @@ class SemiStableTwoBodyCut:
         return integral_1 + integral_2
 
     @property
-    def ImPI_integral_vectorized(self):
+    def ImPI_integral_vectorized(
+        self,
+    ) -> None:
         r"""Vectorized version of :func:`dispersionrelations.dynamics.SemiStableTwoBodyCut.ImPI_integral`"""
         return np.vectorize(self.ImPI_integral)
 
-    def __interpolate_ImPI_integral__(self):
+    def __interpolate_ImPI_integral__(
+        self,
+    ) -> None:
         s_interpolation = np.concatenate(
             [
                 self.unstable_particle.decay_channel.threshold
@@ -1199,7 +1544,10 @@ class SemiStableTwoBodyCut:
             [0, *ImPI_interpolation],
         )
 
-    def ImPI_integral_RE(self, s):
+    def ImPI_integral_RE(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         The :math:`\mathrm{Im}(\Pi(s))` spectral integral for :math:`s\in\mathbb{R}`.
 
@@ -1235,7 +1583,10 @@ class SemiStableTwoBodyCut:
             )
         return result
 
-    def ImPI_integral_CP(self, s):
+    def ImPI_integral_CP(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         The :math:`\mathrm{Im}(\Pi(s))` spectral integral for :math:`s\in\mathbb{C}`.
 
@@ -1251,7 +1602,10 @@ class SemiStableTwoBodyCut:
         """
         return self.ImPI_integral_vectorized(s)
 
-    def __call__(self, s):
+    def __call__(
+        self,
+        s: NDArray,
+    ) -> NDArray:
         r"""
         The :math:`\mathrm{Im}(\Pi(s))` spectral integral for a generic :math:`s`.
 
@@ -1295,8 +1649,8 @@ class SemiStableTwoBodyChannel(Channel):
         self.__vfs__ = np.vectorize(lambda s: 1)
         self.__tfs__ = np.vectorize(taming_factor_squared)
         # Construct the integrand and call the parent constructor:
-        loop_integrand = (
-            lambda s: self.phase_space_function(s)
+        loop_integrand = lambda s: (
+            self.phase_space_function(s)
             * self.vertex_function_squared(s)
             * self.taming_factor_squared(s)
         )
@@ -1319,8 +1673,7 @@ class TwoPotentialModel:
         bg_par: dict,
         res_par: dict,
         channel_sheets: dict = {},
-        s_array: Union[np.ndarray, list] = np.linspace(E_almost_zero, 3 * GeV, 200)
-        ** 2,
+        s_array: np.ndarray | list = np.linspace(E_almost_zero, 3 * GeV, 200) ** 2,
     ):
         # Initialize channels
         self.channels = channels
@@ -1451,12 +1804,16 @@ class TwoPotentialModel:
             self.s_array[..., np.newaxis] - self.m[np.newaxis, ...] ** 2
         )
         self.GR_renormalized_inv = self.GR_inv + self.g @ self.loops_with_bg @ self.g.T
-        self.tR = -self.g.T @ np.linalg.solve(self.GR_renormalized_inv, self.g) # TODO: add a warning for failed inversion
+        self.tR = -self.g.T @ np.linalg.solve(
+            self.GR_renormalized_inv, self.g
+        )  # TODO: add a warning for failed inversion
         self.TR = self.vertex @ self.tR @ (np.swapaxes(self.vertex, -2, -1))
         self.F = np.einsum(
             "...ij,...j->...i",
             -self.vertex @ self.g.T,
-            np.linalg.solve(self.GR_renormalized_inv, self.a),  # TODO: add a warning for failed inversion
+            np.linalg.solve(
+                self.GR_renormalized_inv, self.a
+            ),  # TODO: add a warning for failed inversion
         )
 
     def compute_everything(self, bg_par=None, res_par=None):
@@ -1511,3 +1868,296 @@ class TwoPotentialModel:
 
     def form_factor(self):
         return self.F
+
+
+# class NewChannel:
+#     def __init__(self, threshold):
+#         self.threshold = threshold
+#         self.loop = Complex2RS()
+#         self.phase_space = None
+#         self.vertex_function_squared: VertexFunction | None = None
+#         self.taming_factor_squared: TamingFactor | None = None
+
+#     def vertex_function(
+#         self,
+#         s: NDArray | complex,
+#     ) -> NDArray | complex:
+#         if self.vertex_function_squared is None:
+#             raise NotImplementedError("Vertex function is not implemented")
+#         return np.sqrt(self.vertex_function_squared(s) + 0j)
+
+#     def taming_factor(
+#         self,
+#         s: NDArray | complex,
+#     ) -> NDArray | complex:
+#         if self.taming_factor_squared is None:
+#             raise NotImplementedError("Taming factor is not implemented")
+#         return np.sqrt(self.taming_factor_squared(s) + 0j)
+
+#     def add_dispersive_loop(
+#         self,
+#         loop_di: DispersionIntegralRHC,
+#     ) -> None:
+#         disp_int_to_complex_2RS(loop_di, self.loop)
+
+#     def add_precomputed_loop(
+#         self,
+#         loop1: ComplexInterpolator | None = None,
+#         loop2: ComplexInterpolator | None = None,
+#         loop_disc: ComplexInterpolator | None = None,
+#         index: int | None = 0,
+#     ) -> None:
+#         if loop1 is not None:
+#             self.loop.f_1.add_function(loop1, index)
+#         if loop2 is not None:
+#             self.loop.f_2.add_function(loop2, index)
+#         if loop_disc is not None:
+#             self.loop.f_disc.add_function(loop_disc, index)
+
+
+# class NewStableTwoBodyChannel(NewChannel):
+#     def __init__(
+#         self,
+#         m1: float,
+#         m2: float,
+#         vertex_function_squared: VertexFunction,
+#         taming_factor_squared: TamingFactor,
+#         build_dispersively: bool = True,
+#     ):
+#         self.m1 = m1
+#         self.m2 = m2
+#         super().__init__(threshold=(m1 + m2) ** 2)
+#         self.phase_space = partial(
+#             phase_space_twobody,
+#             m1_squared=m1**2,
+#             m2_squared=m2**2,
+#         )
+#         self.vertex_function_squared = partial(
+#             vertex_function_squared,
+#             m1_squared=m1**2,
+#             m2_squared=m2**2,
+#         )
+#         self.taming_factor_squared = partial(taming_factor_squared)
+#         if build_dispersively:
+#             self.add_dispersive_loop(
+#                 DispersionIntegralRHC(
+#                     integrand=lambda s: (
+#                         self.phase_space(s)
+#                         * self.vertex_function_squared(s)
+#                         * self.taming_factor_squared(s)
+#                     ),
+#                     threshold=self.threshold,
+#                 )
+#             )
+
+
+# class NewUnstableParticle:
+#     def __init__(
+#         self,
+#         decay_channel: NewChannel,
+#         m_squared: float | None = None,
+#         g_squared: float | None = None,
+#     ):
+#         self.decay_channel = decay_channel
+#         self.m_squared = m_squared
+#         self.g_squared = g_squared
+
+#     def set_pole_location(
+#         self,
+#         s_p: complex,
+#         pole_sheet: Literal[1, 2] = 2,
+#     ) -> None:
+#         loop_at_the_pole = self.decay_channel.loop(s_p, sheet=pole_sheet)
+#         g_squared = -np.imag(s_p) / np.imag(loop_at_the_pole)
+#         m_squared = np.real(s_p) + g_squared * np.real(loop_at_the_pole)
+#         if g_squared < 0:
+#             raise ValueError(
+#                 f"g_squared={g_squared} should be positive. Check the pole position or the sheet."
+#             )
+#         if m_squared < 0:
+#             raise ValueError(
+#                 f"m_squared={m_squared} should be positive. Check the pole position or the sheet."
+#             )
+#         self.g_squared = g_squared
+#         self.m_squared = m_squared
+
+#     def propagator(
+#         self,
+#         s: NDArray | complex,
+#         sheet: Literal[1, 2] = 1,
+#     ) -> NDArray | complex:
+#         if self.g_squared is None or self.m_squared is None:
+#             raise RuntimeError("The bare parameter values have not been initialized.")
+#         return 1 / (
+#             s - self.m_squared + self.g_squared * self.decay_channel.loop(s, sheet)
+#         )
+
+#     def spectral_function(
+#         self,
+#         s: NDArray | complex,
+#     ) -> NDArray | complex:
+#         return (
+#             1
+#             / (2j * np.pi)
+#             * self.propagator(s, sheet=1)
+#             * self.propagator(s, sheet=2)
+#             * self.g_squared
+#             * self.decay_channel.loop.discontinuity(s)
+#         )
+
+#     # def spectral_integral(
+#     #     self,
+#     #     s: NDArray | complex,
+#     #     f: Callable,
+#     #     lower_bound: complex,
+#     #     upper_bound: complex,
+#     #     gl_order: int = 100,
+#     #     split_n: int = 5,
+#     #     integration_split_points: list[float] = [2, 3, 5, 10, 50, 100],
+#     #     hook_parameter: float = 1,
+#     # ) -> NDArray | complex:
+#     #     # TODO fix integration (broadcasting done wrong)
+#     #     # TODO method needed for integrating along one axis
+#     #     # TODO method needed for integrating in the path [a, i1, i2, ..., in, b]
+#     #     integrand = lambda x: f(s, x) * self.spectral_function(x)
+#     #     middle_bound = (
+#     #         lower_bound * (1 - hook_parameter) + np.real(upper_bound) * hook_parameter
+#     #     )
+#     #     integral_1 = 0 * s + 0j
+#     #     integral_2 = 0 * s + 0j
+#     #     if hook_parameter != 0:
+#     #         integral_1 += integrate_gl(
+#     #             integrand,
+#     #             lower_bound,
+#     #             middle_bound,
+#     #             order=gl_order,
+#     #             split_n=split_n,
+#     #         )
+
+#     #     if np.imag(upper_bound) != 0:
+#     #         integral_2 += integrate_gl(
+#     #             integrand,
+#     #             middle_bound,
+#     #             upper_bound,
+#     #             order=gl_order,
+#     #             split_n=split_n,
+#     #         )
+
+#     #     return integral_1 + integral_2
+
+
+# class NewSemiStableTwoBodyChannel(NewChannel):
+#     def __init__(
+#         self,
+#         unstable_particle: NewUnstableParticle,
+#         spectator_mass: float,
+#         vertex_function_squared: VertexFunction,
+#         taming_factor_squared: TamingFactor,
+#         build_dispersively: bool = True,
+#     ):
+#         self.unstable_particle = unstable_particle
+#         self.spectator_mass = spectator_mass
+#         super().__init__(
+#             threshold=(
+#                 spectator_mass + np.sqrt(unstable_particle.decay_channel.threshold)
+#             )
+#             ** 2
+#         )
+#         self.phase_space_s_x = lambda s, x: phase_space_twobody(s, x, spectator_mass**2)
+#         self.vertex_function_squared_s_x = lambda s, x: vertex_function_squared(
+#             s, x, spectator_mass**2
+#         )
+#         self.loop_imag_s_x = lambda s, x: (
+#             self.phase_space_s_x(s, x)
+#             * self.vertex_function_squared_s_x(s, x)
+#             * self.unstable_particle.spectral_function(x)
+#         )
+#         self.taming_factor_squared = partial(taming_factor_squared)
+
+#         # TODO decide what to do with the two functions below
+#         self.phase_space = lambda s: self.loop_imag(s)
+#         self.vertex_function_squared = np.vectorize(lambda s: 1)
+
+#         if build_dispersively:
+#             self.add_dispersive_loop(
+#                 DispersionIntegralRHC(
+#                     integrand=lambda s: self.loop_imag(s),
+#                     threshold=self.threshold,
+#                 )
+#             )
+
+#     def loop_imag(
+#         self,
+#         s: NDArray | complex,
+#         gl_order: int = 100,
+#         split_n: int = 20,
+#         hook_parameter: float = 1,
+#     ) -> NDArray | complex:
+#         s = np.asarray(s)
+#         result = np.zeros(s.shape, dtype=complex)
+
+#         lower_bound = self.unstable_particle.decay_channel.threshold
+#         upper_bound = (np.sqrt(s) - self.spectator_mass) ** 2
+
+#         if hook_parameter == 0:
+#             intervals = np.empty([*upper_bound.shape, 2], dtype=complex)
+#             intervals[...,0] = lower_bound
+#             intervals[...,1] = upper_bound
+#             intervals_split = split_intervals_logarithmically(intervals, split_n)
+#             result = integrate_intervals_partially_gl(
+#                 self.loop_imag_s_x,
+#                 s,
+#                 intervals_split,
+#                 order=gl_order,
+#                 s_x_axis_overlap=True,
+#             )
+#             return result
+
+#         real_upper_bound_mask = np.imag(upper_bound) == 0
+#         complex_upper_bound_mask = ~real_upper_bound_mask
+
+#         if np.any(real_upper_bound_mask):
+#             real_s = s[real_upper_bound_mask]
+#             real_upper_bound = upper_bound[real_upper_bound_mask]
+#             real_intervals = np.empty([*real_upper_bound.shape, 2])
+#             real_intervals[...,0] = lower_bound
+#             real_intervals[...,1] = real_upper_bound
+#             real_intervals_split = split_intervals_logarithmically(real_intervals, split_n)
+#             result[real_upper_bound_mask] += integrate_intervals_partially_gl(
+#                 self.loop_imag_s_x,
+#                 real_s,
+#                 real_intervals_split,
+#                 order=gl_order,
+#                 s_x_axis_overlap=True,
+#             )
+
+#         if np.any(complex_upper_bound_mask):
+#             complex_s = s[complex_upper_bound_mask]
+#             complex_upper_bound = upper_bound[complex_upper_bound_mask]
+#             complex_middle_bound = (
+#                     lower_bound * (1 - hook_parameter) + np.real(complex_upper_bound) * hook_parameter
+#                 )
+#             complex_intervals_1 = np.empty([*complex_upper_bound.shape, 2], dtype=complex)
+#             complex_intervals_2 = np.empty([*complex_upper_bound.shape, 2], dtype=complex)
+#             complex_intervals_1[...,0] = lower_bound
+#             complex_intervals_1[...,1] = complex_middle_bound
+#             complex_intervals_2[...,0] = complex_middle_bound
+#             complex_intervals_2[...,1] = complex_upper_bound
+#             complex_intervals_split_1 = split_intervals_logarithmically(complex_intervals_1, split_n)
+#             complex_intervals_split_2 = split_intervals_evenly(complex_intervals_2, split_n)
+#             result[complex_upper_bound_mask] += integrate_intervals_partially_gl(
+#                 self.loop_imag_s_x,
+#                 complex_s,
+#                 complex_intervals_split_1,
+#                 order=gl_order,
+#                 s_x_axis_overlap=True,
+#             )
+#             result[complex_upper_bound_mask] += integrate_intervals_partially_gl(
+#                 self.loop_imag_s_x,
+#                 complex_s,
+#                 complex_intervals_split_2,
+#                 order=gl_order,
+#                 s_x_axis_overlap=True,
+#             )
+
+#         return result

@@ -26,6 +26,8 @@ extensions = [
     "matplotlib.sphinxext.plot_directive",
     "sphinx_rtd_theme",
     "sphinx_copybutton",
+    "sphinx_autodoc_typehints",
+    "sphinx.ext.intersphinx",
 ]
 
 autosummary_generate = True
@@ -89,3 +91,12 @@ def bold_red_color_role(name, rawtext, text, lineno, inliner, options={}, conten
 
 roles.register_local_role("red", red_color_role)
 roles.register_local_role("boldred", bold_red_color_role)
+
+autodoc_type_aliases = {
+    "NDArray": ":py:class:`NDArray <numpy.typing.NDArray>`",
+}
+autodoc_typehints = "signature"
+
+intersphinx_mapping = {
+    "numpy": ("https://numpy.org/doc/stable/", None),
+}

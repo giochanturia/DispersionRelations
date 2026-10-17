@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dispersionrelations"
-version = "1.1.0"
+version = "2.0.0-dev"
 authors = [
     {name="George Chanturia"}
 ]
@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "scipy", "scikit-image", "matplotlib", "uncertainties"]
+dependencies = ["numpy", "scipy", "scikit-image", "matplotlib", "uncertainties", "typing_extensions"]
 
 [project.urls]
 homepage = "https://github.com/giochanturia/DispersionRelations"
@@ -32,8 +32,9 @@ docs = [
     "sphinx-copybutton",
     "sphinxcontrib-bibtex",
     "docutils",
+    "sphinx-autodoc-typehints",
 ]
-dev = ["pytest", "pytest-cov"]
+dev = ["pytest", "pylint", "py2puml", "pycallgraph2", "pytest-cov"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

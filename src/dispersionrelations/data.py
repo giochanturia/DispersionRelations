@@ -1,12 +1,239 @@
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Typing                           │
+# └──────────────────────────────────────────────────────────┘
+from __future__ import annotations  # for type hints in python==3.9
+from typing import Literal
+from numpy.typing import NDArray
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
+import os
+import warnings
 import numpy as np
 import scipy as sp
-import warnings
-import os
+from scipy.interpolate import interp1d, RegularGridInterpolator
 
-from dispersionrelations.utils import cite, uncite
+# ┌──────────────────────────────────────────────────────────┐
+# │                          DATA                            │
+# └──────────────────────────────────────────────────────────┘
+
+def cite(
+    ref: str,
+) -> str:
+    r"""
+    Produces a LaTeX citation command.
+
+    Parameters
+    ----------
+    ref : str
+        The reference key.
+
+    Returns
+    -------
+    citation : str
+        The LaTeX citation command :code:`\cite{ref}`.
+
+    See Also
+    --------
+    uncite : Inverse operation.
+    """
+    return r"\cite{" + ref + "}"
 
 
-def check_pd(mat):
+def uncite(
+    citation: str,
+) -> str:
+    r"""
+    Inverse operation of :func:`cite`.
+    Extracts the reference key from a LaTeX citation command.
+
+    Parameters
+    ----------
+    citation : str
+        The LaTeX citation command :code:`\cite{ref}`.
+
+    Returns
+    -------
+    ref : str
+        The reference key.
+
+    Raises
+    ------
+    ValueError
+        If the input is not in the correct format.
+
+    See also
+    --------
+    cite : Forward operation.
+    """
+    if citation[:6] != r"\cite{" or citation[-1] != "}":
+        raise ValueError(f"Invalid citation format: {citation}")
+    result = citation[6:-1]
+    if result == "":
+        warnings.warn("Empty citation key.")
+    return result
+
+
+def save_to_json(
+    data: dict,
+    filename: str = None,
+    folder: str = "",
+    metadata: dict = {},
+) -> None:
+    r"""
+    Saves a dictionary to a JSON file.
+
+    Parameters
+    ----------
+    data : dict
+        The data to be saved.
+    filename : str
+        The name of the file to save the data to. If None, the current date and time will be used.
+    folder : str
+        The folder to save the file in. Default is the current folder.
+    metadata : dict
+        Additional metadata to be included in the JSON file. Default is an empty dictionary.
+
+    Returns
+    -------
+    None
+    """
+
+    if filename is None:
+        filename = datetime.now().strftime("%Y_%m%d_%H%M%S")
+
+    if os.path.exists(os.path.join(folder, filename + ".json")):
+        warnings.warn(
+            f"File {filename} already exists in folder {folder}. Renaming the old file to avoid overwriting."
+        )
+        os.rename(
+            os.path.join(folder, filename + ".json"),
+            os.path.join(folder, filename + "_old.json"),
+        )
+
+    with open(os.path.join(folder, filename + ".json"), "w") as f:
+        json.dump({**data, **metadata}, f, indent=4, ensure_ascii=False)
+
+
+def load_from_json(
+    filename: str,
+    folder: str = "",
+) -> dict:
+    r"""
+    Loads a dictionary from a JSON file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the file to load the data from.
+    folder : str
+        The folder to load the file from. Default is the current folder.
+
+    Returns
+    -------
+    data : dict
+        The loaded data.
+    """
+    with open(os.path.join(folder, filename + ".json"), "r") as f:
+        return json.load(f)
+
+
+def scientific_notation(
+    num: float,
+    rounding: int = 2,
+) -> str:
+    r"""
+    Scientific notation.
+
+    Parameters
+    ----------
+    num : float
+        A real number.
+    rounding : int
+        Number of digits after the period.
+
+    Returns
+    -------
+    num_not : str
+        A LaTeX code for the number representation.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from dispersionrelations.data import scientific_notation
+    >>> print(scientific_notation(np.pi))
+    '3.1415926536'
+    >>> print(scientific_notation(13.4))
+    '1.34 \\times 10^{1}'
+    """
+    exponent = int(np.floor(np.log10(np.absolute(num))))
+    radical = round(num / (10**exponent), rounding)
+    if exponent == 0:
+        return str(radical)
+    return str(radical) + r" \times 10^{" + str(exponent) + "}"
+
+
+def rounding_pdg(
+    mean: float,
+    std: float,
+) -> tuple[float, float]:
+    r"""
+    Rounding with PDG rules :cite:`Zyla:2020zbs`.
+
+    Parameters
+    ----------
+    mean : float
+        Mean value of the quantity.
+    std : float
+        Standard deviation of the quantity.
+
+    Returns
+    -------
+    mean_out, std_out : (float, float)
+        Mean value and standard deviation, cited according to the PDG prescription.
+
+    Examples
+    --------
+    >>> from dispersionrelations.data import rounding_pdg
+    >>> print(rounding_pdg(0.827, 0.119))
+    (0.83, 0.12)
+    >>> print(rounding_pdg(0.827, 0.367))
+    (0.8, 0.4)
+    """
+    before_zero = int(np.floor(np.log10(np.absolute(std)))) + 1
+    three_highest_digits = int(std / 10 ** (before_zero - 3))
+    to_keep = 2  # default
+    if 100 <= three_highest_digits <= 354:
+        to_keep = 2
+    if 355 <= three_highest_digits <= 949:
+        to_keep = 1
+    if 950 <= three_highest_digits <= 999:
+        to_keep = 1  # because 1000 has 3 digits now
+        three_highest_digits = 1000
+
+    std_out = round(
+        three_highest_digits * 10 ** (before_zero - 3), to_keep - before_zero
+    )
+    mean_out = round(mean, to_keep - before_zero)
+
+    if mean_out % 1 == 0 and std_out % 1 == 0:
+        mean_out = int(mean_out)
+        std_out = int(std_out)
+
+    return mean_out, std_out
+
+
+def check_pd(
+    mat: NDArray,
+) -> bool:
     r"""
     Check if a matrix is positive definite.
 
@@ -27,7 +254,10 @@ def check_pd(mat):
         return False
 
 
-def corr_to_cov(corr, std):
+def corr_to_cov(
+    corr: NDArray,
+    std: NDArray,
+) -> NDArray:
     r"""
     Convert a correlation matrix to a covariance matrix.
 
@@ -65,7 +295,9 @@ def corr_to_cov(corr, std):
     return cov
 
 
-def cov_to_corr(cov):
+def cov_to_corr(
+    cov: NDArray,
+) -> NDArray:
     r"""
     Convert a covariance matrix to a correlation matrix.
 
@@ -96,7 +328,9 @@ def cov_to_corr(cov):
     return corr
 
 
-def cov_to_std(cov):
+def cov_to_std(
+    cov: NDArray,
+) -> NDArray:
     r"""
     Convert a covariance matrix to standard deviations (square root of the diagonal elements).
 
@@ -121,7 +355,10 @@ def cov_to_std(cov):
     return np.sqrt(np.diag(cov))
 
 
-def std_to_cov(std, correlation=0.0):
+def std_to_cov(
+    std: NDArray,
+    correlation: float = 0.0,
+) -> NDArray:
     r"""
     Convert standard deviations to a covariance matrix, assuming a given correlation structure.
 
@@ -154,7 +391,12 @@ def std_to_cov(std, correlation=0.0):
     return cov
 
 
-def chi2(fit_data, observed_data, covariance_matrix, weights=None):
+def chi2(
+    fit_data: NDArray,
+    observed_data: NDArray,
+    covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+) -> float:
     r"""
     :math:`\chi^2`, computed using modelled and observed data.
 
@@ -190,7 +432,12 @@ def chi2(fit_data, observed_data, covariance_matrix, weights=None):
     return difference @ np.linalg.inv(covariance_matrix) @ difference
 
 
-def chi2_with_inverse(fit_data, observed_data, inverse_covariance_matrix, weights=None):
+def chi2_with_inverse(
+    fit_data: NDArray,
+    observed_data: NDArray,
+    inverse_covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+) -> float:
     r"""
     :math:`\chi^2`, computed using modelled and observed data.
     This version of the function accepts the inverse of the covariance matrix
@@ -228,7 +475,12 @@ def chi2_with_inverse(fit_data, observed_data, inverse_covariance_matrix, weight
     return difference @ inverse_covariance_matrix @ difference
 
 
-def chi2_vector(fit_data, observed_data, covariance_matrix, weights=None):
+def chi2_vector(
+    fit_data: NDArray,
+    observed_data: NDArray,
+    covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+) -> NDArray:
     r"""
     :math:`\chi^2` vector.
 
@@ -302,8 +554,11 @@ def chi2_vector(fit_data, observed_data, covariance_matrix, weights=None):
 
 
 def chi2_vector_with_inverse(
-    fit_data, observed_data, inverse_covariance_matrix, weights=None
-):
+    fit_data: NDArray,
+    observed_data: NDArray,
+    inverse_covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+) -> NDArray:
     r"""
     :math:`\chi^2`, computed using modelled and observed data.
     This version of the function accepts the inverse of the covariance matrix
@@ -342,8 +597,12 @@ def chi2_vector_with_inverse(
 
 
 def chi2_reduced(
-    fit_data, observed_data, covariance_matrix, weights=None, number_of_parameters=0
-):
+    fit_data: NDArray,
+    observed_data: NDArray,
+    covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+    number_of_parameters: int = 0,
+) -> float:
     r"""
     A reduced :math:`\chi^2`, computed using modelled and observed data.
 
@@ -382,12 +641,12 @@ def chi2_reduced(
 
 
 def chi2_reduced_with_inverse(
-    fit_data,
-    observed_data,
-    inverse_covariance_matrix,
-    weights=None,
-    number_of_parameters=0,
-):
+    fit_data: NDArray,
+    observed_data: NDArray,
+    inverse_covariance_matrix: NDArray,
+    weights: NDArray | None = None,
+    number_of_parameters: int = 0,
+) -> float:
     r"""
     A reduced :math:`\chi^2`, computed using modelled and observed data.
     This version of the function accepts the inverse of the covariance matrix
@@ -462,7 +721,16 @@ class Datablock:
         A dictionary to store additional metadata about the dataset.
     """
 
-    def __init__(self, x, y, xlabel, ylabel, cov_stat=None, cov_syst=None, metadata={}):
+    def __init__(
+        self,
+        x: NDArray | list,
+        y: NDArray | list,
+        xlabel: str,
+        ylabel: str,
+        cov_stat: NDArray | None = None,
+        cov_syst: NDArray | None = None,
+        metadata: dict = {},
+    ):
         self.x = x
         self.y = y
         self.xlabel = xlabel
@@ -484,7 +752,9 @@ class Datablock:
 
         self.metadata = metadata
 
-    def check_cov_pd(self):
+    def check_cov_pd(
+        self,
+    ) -> None:
         r"""
         Check if the total covariance matrix (statistical + systematic) is positive definite.
         Display a warning if it is not.
@@ -496,7 +766,9 @@ class Datablock:
         if check_pd(self.cov_stat + self.cov_syst) == False:
             warnings.warn("The total covariance matrix is not positive definite")
 
-    def get_std_stat(self):
+    def get_std_stat(
+        self,
+    ) -> NDArray:
         r"""
         Get the statistical standard deviations (square root of the diagonal elements of the statistical covariance matrix).
 
@@ -507,7 +779,9 @@ class Datablock:
         """
         return cov_to_std(self.cov_stat)
 
-    def get_std_syst(self):
+    def get_std_syst(
+        self,
+    ) -> NDArray:
         r"""
         Get the systematic standard deviations (square root of the diagonal elements of the systematic covariance matrix).
 
@@ -518,7 +792,10 @@ class Datablock:
         """
         return cov_to_std(self.cov_syst)
 
-    def get_std_total(self, add_in_quadrature=True):
+    def get_std_total(
+        self,
+        add_in_quadrature: bool = True,
+    ) -> NDArray:
         r"""
         Get the total standard deviations (square root of the diagonal elements of the total covariance matrix).
 
@@ -540,7 +817,10 @@ class Datablock:
         else:
             return std_stat + std_syst
 
-    def add_cov_stat(self, cov_stat):
+    def add_cov_stat(
+        self,
+        cov_stat: NDArray,
+    ) -> None:
         r"""
         Add a contribution to the statistical covariance matrix.
 
@@ -564,7 +844,10 @@ class Datablock:
             )
         self.cov_stat += cov_stat
 
-    def add_cov_syst(self, cov_syst):
+    def add_cov_syst(
+        self,
+        cov_syst: NDArray,
+    ) -> None:
         r"""
         Add a contribution to the systematic covariance matrix.
 
@@ -588,7 +871,11 @@ class Datablock:
             )
         self.cov_syst += cov_syst
 
-    def add_std_stat(self, std_stat, correlation=0.0):
+    def add_std_stat(
+        self,
+        std_stat: NDArray | list,
+        correlation: float = 0.0,
+    ) -> None:
         r"""
         Add a contribution to the statistical covariance matrix from standard deviations.
 
@@ -616,7 +903,11 @@ class Datablock:
         cov_stat = std_to_cov(std_stat, correlation=correlation)
         self.add_cov_stat(cov_stat)
 
-    def add_rel_stat(self, rel_stat, correlation=0.0):
+    def add_rel_stat(
+        self,
+        rel_stat: NDArray | list,
+        correlation: float = 0.0,
+    ) -> None:
         r"""
         Add a contribution to the statistical covariance matrix from relative uncertainties.
 
@@ -639,7 +930,11 @@ class Datablock:
         std_stat = np.abs(rel_stat * self.y)
         self.add_std_stat(std_stat, correlation=correlation)
 
-    def add_std_syst(self, std_syst, correlation=1.0):
+    def add_std_syst(
+        self,
+        std_syst: NDArray | list,
+        correlation: float = 1.0,
+    ) -> None:
         r"""
         Add a contribution to the systematic covariance matrix from standard deviations.
 
@@ -667,7 +962,11 @@ class Datablock:
         cov_syst = std_to_cov(std_syst, correlation=correlation)
         self.add_cov_syst(cov_syst)
 
-    def add_rel_syst(self, rel_syst, correlation=1.0):
+    def add_rel_syst(
+        self,
+        rel_syst: NDArray | list,
+        correlation: float = 1.0,
+    ) -> None:
         r"""
         Add a contribution to the systematic covariance matrix from relative uncertainties.
 
@@ -690,7 +989,13 @@ class Datablock:
         std_syst = np.abs(rel_syst * self.y)
         self.add_std_syst(std_syst, correlation=correlation)
 
-    def add_external_calibration(self, c, c_std, correlation=1.0, new_ylabel=None):
+    def add_external_calibration(
+        self,
+        c: float,
+        c_std: float,
+        correlation: float = 1.0,
+        new_ylabel: str | None = None,
+    ) -> None:
         r"""
         Apply an external calibration factor to the data and propagate its uncertainty.
 
@@ -731,12 +1036,12 @@ class Datablock:
 
     def rescale_y(
         self,
-        factor,
-        factor_std=None,
-        stat_or_syst="syst",
-        correlation=0.0,
-        new_ylabel=None,
-    ):
+        factor: NDArray,
+        factor_std: NDArray | None = None,
+        stat_or_syst: Literal["syst", "stat"] = "syst",
+        correlation: float = 0.0,
+        new_ylabel: str | None = None,
+    ) -> None:
         r"""
         Rescale the y values by a given factor without propagating the uncertainty.
 
@@ -794,7 +1099,10 @@ class Datablock:
                 self.add_rel_syst(rel_syst, correlation=correlation)
             self.check_cov_pd()
 
-    def filter_data(self, mask):
+    def filter_data(
+        self,
+        mask: NDArray,
+    ) -> None:
         r"""
         Filter the data based on a boolean mask.
 
@@ -824,7 +1132,11 @@ class Datablock:
         self.N = len(self.x)
         self.check_cov_pd()
 
-    def filter_xrange(self, x_min=None, x_max=None):
+    def filter_xrange(
+        self,
+        x_min: float | None = None,
+        x_max: float | None = None,
+    ) -> None:
         r"""
         Filter the data based on x range.
 
@@ -847,7 +1159,11 @@ class Datablock:
         )
         self.filter_data(mask_lower * mask_upper)
 
-    def filter_yrange(self, y_min=None, y_max=None):
+    def filter_yrange(
+        self,
+        y_min: float | None = None,
+        y_max: float | None = None,
+    ) -> None:
         r"""
         Filter the data based on y range.
 
@@ -870,7 +1186,10 @@ class Datablock:
         )
         self.filter_data(mask_lower * mask_upper)
 
-    def remove_datapoints(self, indices):
+    def remove_datapoints(
+        self,
+        indices: NDArray | list,
+    ) -> None:
         r"""
         Remove data points based on their indices.
 
@@ -897,7 +1216,10 @@ class Datablock:
         mask[indices] = False
         self.filter_data(mask)
 
-    def downsample_by(self, factor):
+    def downsample_by(
+        self,
+        factor: int,
+    ) -> None:
         r"""
         Downsample the data by a given factor.
 
@@ -921,7 +1243,10 @@ class Datablock:
         mask[::factor] = True
         self.filter_data(mask)
 
-    def downsample_to(self, N_points):
+    def downsample_to(
+        self,
+        N_points: int,
+    ) -> None:
         r"""
         Downsample the data to a given number of points.
 
@@ -941,7 +1266,10 @@ class Datablock:
         """
         raise NotImplementedError("downsample_to is not implemented yet")
 
-    def interpolate(self, new_x):
+    def interpolate(
+        self,
+        new_x: NDArray | list,
+    ) -> None:
         r"""
         Interpolate the data to new x values using linear interpolation.
 
@@ -959,18 +1287,60 @@ class Datablock:
         ValueError
             If new_x is not a one-dimensional array.
         """
-        raise NotImplementedError("interpolate is not implemented yet")
+        raise NotImplementedError("interpolate is not reliably implemented yet")
+        new_x = np.asarray(new_x)
+        new_y = interp1d(self.x, self.y)(new_x)
+        if (
+            np.sum(self.cov_stat**2) == np.sum(np.diag(self.cov_stat) ** 2)
+            or np.linalg.matrix_rank(self.cov_stat) == 1
+        ):
+            std_stat = cov_to_std(self.cov_stat)
+            new_std_stat = interp1d(self.x, std_stat)(new_x)
+            new_cov_stat = std_to_cov(new_std_stat)
+        else:
+            new_cov_stat = RegularGridInterpolator((self.x, self.x), self.cov_stat)(
+                np.meshgrid(new_x, new_x, indexing="ij"), method="linear"
+            )
 
-    def __str__(self):
+        if (
+            np.sum(self.cov_syst**2) == np.sum(np.diag(self.cov_syst) ** 2)
+            or np.linalg.matrix_rank(self.cov_syst) == 1
+        ):
+            std_syst = cov_to_std(self.cov_syst)
+            new_std_syst = interp1d(self.x, std_syst)(new_x)
+            new_cov_syst = std_to_cov(new_std_syst)
+        else:
+            new_cov_syst = RegularGridInterpolator((self.x, self.x), self.cov_syst)(
+                np.meshgrid(new_x, new_x, indexing="ij"), method="linear"
+            )
+
+        return Datablock(
+            new_x,
+            new_y,
+            self.xlabel,
+            self.ylabel,
+            cov_stat=new_cov_stat,
+            cov_syst=new_cov_syst,
+            metadata=self.metadata,
+        )
+
+    def __str__(
+        self,
+    ) -> str:
         result = f"Datablock with {self.N} points(s): {self.xlabel} vs {self.ylabel}."
         if "ref" in self.metadata:
             result += f" Reference: {self.metadata['ref']}."
         return result
 
-    def __repr__(self):
+    def __repr__(
+        self,
+    ) -> str:
         return self.__str__()
 
-    def __add__(self, other):
+    def __add__(
+        self,
+        other: Datablock,
+    ) -> Datablock:
         r"""
         Add two Datablock objects.
 
@@ -1020,7 +1390,10 @@ class Datablock:
             metadata=new_metadata,
         )
 
-    def __radd__(self, other):
+    def __radd__(
+        self,
+        other: Datablock,
+    ) -> Datablock:
         if other == 0:
             return self
         return self.__add__(other)
@@ -1047,11 +1420,11 @@ class Datawriter:
 
     def __init__(
         self,
-        datablock,
-        file_prefix,
-        folder_path="",
-        quiet=False,
-        format=dict(fmt="% .11e", delimiter="\t"),
+        datablock: Datablock,
+        file_prefix: str,
+        folder_path: str = "",
+        quiet: bool = False,
+        format: dict = dict(fmt="% .11e", delimiter="\t"),
     ):
         self.datablock = datablock
         self.folder = folder_path
@@ -1066,7 +1439,10 @@ class Datawriter:
             self.footer += self.datablock.metadata["footer"]
         os.makedirs(self.folder, exist_ok=True)
 
-    def write_data(self, **filekwargs):
+    def write_data(
+        self,
+        **filekwargs,
+    ) -> None:
         r"""
         Write the data to a .dat file.
         The file will contain columns for x, y, statistical uncertainty, and systematic uncertainty.
@@ -1103,7 +1479,10 @@ class Datawriter:
                 f'"{os.path.join(self.folder, f"{self.file_prefix}.dat")}" created {data.shape}.'
             )
 
-    def write_cov_stat(self, **filekwargs):
+    def write_cov_stat(
+        self,
+        **filekwargs,
+    ) -> None:
         r"""
         Write the statistical covariance matrix to a .dat file.
         The file will contain the statistical covariance matrix.
@@ -1132,7 +1511,10 @@ class Datawriter:
                 f'"{os.path.join(self.folder, f"{self.file_prefix}_COV_STAT.dat")}" created {self.datablock.cov_stat.shape}.'
             )
 
-    def write_cov_syst(self, **filekwargs):
+    def write_cov_syst(
+        self,
+        **filekwargs,
+    ) -> None:
         r"""
         Write the systematic covariance matrix to a .dat file.
         The file will contain the systematic covariance matrix.
@@ -1161,7 +1543,10 @@ class Datawriter:
                 f'"{os.path.join(self.folder, f"{self.file_prefix}_COV_SYST.dat")}" created {self.datablock.cov_syst.shape}.'
             )
 
-    def write_all(self, **filekwargs):
+    def write_all(
+        self,
+        **filekwargs,
+    ) -> None:
         r"""
         Write all data to .dat files.
         This includes the main data file, the statistical covariance matrix file, and the systematic covariance matrix file.
@@ -1196,14 +1581,21 @@ class Datareader:
         The prefix for the input files.
     """
 
-    def __init__(self, folder, prefix):
-        self.folder = folder
-        self.prefix = prefix
-        self.file_data = os.path.join(folder, f"{prefix}.dat")
-        self.file_cov_stat = os.path.join(folder, f"{prefix}_COV_STAT.dat")
-        self.file_cov_syst = os.path.join(folder, f"{prefix}_COV_SYST.dat")
+    def __init__(
+        self,
+        folder: str,
+        prefix: str,
+    ):
+        self.folder: str = folder
+        self.prefix: str = prefix
+        self.file_data: str = os.path.join(folder, f"{prefix}.dat")
+        self.file_cov_stat: str = os.path.join(folder, f"{prefix}_COV_STAT.dat")
+        self.file_cov_syst: str = os.path.join(folder, f"{prefix}_COV_SYST.dat")
 
-    def read_all(self, **filekwargs):
+    def read_all(
+        self,
+        **filekwargs,
+    ) -> Datablock:
         r"""
         Read all data from .dat files and return a Datablock object.
         This includes the main data file, the statistical covariance matrix file, and the systematic covariance matrix file.

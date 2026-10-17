@@ -119,22 +119,22 @@ Taking an integral with a Cauchy singularity can become numerically unstable. To
 .. math::
     \int_{s_{\text{thr}}}^{\infty} \frac{\mathrm{Im}(f(z)) \text{d} z}{(s-s_0)^n(s-z)}
 	&= \int_{s_{\text{thr}}}^{\infty} \frac{\left(\mathrm{Im}(f(z))-\mathrm{Im}(f(s))\right) \text{d} z}{(z-s_0)^n(s-z)} \\
-	&+ \mathrm{Im}(f(s)) \int_{s_{\text{thr}}}^{\infty} \frac{\mathrm{Im}(f(z)) \text{d} z}{(z-s_0)^n(z-s)} \, ,
+	&+ \mathrm{Im}(f(s)) \int_{s_{\text{thr}}}^{\infty} \frac{\text{d} z}{(z-s_0)^n(z-s)} \, ,
     :label: eq:Cauchy-monomial-dispersion-integral
 
 where the integral
 
 .. math::
-    \mathcal{I}_{-n}(s, s_0; s_\text{thr}, \infty) \equiv \int_{s_{\text{thr}}}^{\infty} \frac{\mathrm{Im}(f(z)) \text{d} z}{(z-s_0)^n(z-s)}
+    \mathcal{I}_{-n}(s, s_0; s_\text{thr}, \infty) \equiv \int_{s_{\text{thr}}}^{\infty} \frac{\text{d} z}{(z-s_0)^n(z-s)}
 
 is independent of :math:`f` and can be computed analytically,
 
 .. math::
-    \mathcal{I}_{-n}(s, s_0; s_{\text{\text{thr}}}, \infty)
+    \mathcal{I}_{-n}(s, s_0; s_{\text{thr}}, \infty)
 	= (s-s_0)^{-n} \left(
 	\log\left(\frac{z-s}{z-s_0}\right)
 	+ \sum_{k=1}^{n-1} \frac{1}{k} \frac{(s-s_0)^{k}}{(z-s_0)^{k}}
-	\right)\bigg|_{z=s_{\text{\text{thr}}}}^{z=\infty} \, .
+	\right)\bigg|_{z=s_{\text{thr}}}^{z=\infty} \, .
 
 
 Given that :math:`\mathrm{Im}(f(z))` (i.e. the discontinuity itself) is differentiable along the cut, the first term of Eq. :eq:`eq:Cauchy-monomial-dispersion-integral` has a regular integrand at :math:`z=s` and one can take the integral without numerical complications. It is instructive to take explicit look at this for a once-subtracted case,

@@ -6,12 +6,15 @@ The package consists of the following modules:
 .. toctree::
    :maxdepth: 1
 
+   complex
+   conformal
    constants
-   utils
    data
-   kinematics
+   domains
    dynamics
    integrals
+   interpolation
+   kinematics
 
 
 The **constants** module includes a collection of physical and mathematical constants and related functions used throughout the package.

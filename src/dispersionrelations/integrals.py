@@ -1,61 +1,315 @@
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Typing                           │
+# └──────────────────────────────────────────────────────────┘
+from __future__ import annotations  # for type hints in python==3.9
+from typing import Callable, NewType
+from typing_extensions import override
+from numpy.typing import NDArray
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+from dispersionrelations.domains import Domainify
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
 import warnings
-
 import numpy as np
-from dispersionrelations.utils import logC
 
-z_gl_100, w_gl_100 = np.polynomial.legendre.leggauss(100)
-z_gl_500, w_gl_500 = np.polynomial.legendre.leggauss(500)
-z_gl_1000, w_gl_1000 = np.polynomial.legendre.leggauss(1000)
-z_gl_2000, w_gl_2000 = np.polynomial.legendre.leggauss(2000)
+# ┌──────────────────────────────────────────────────────────┐
+# │                    Internal imports                      │
+# └──────────────────────────────────────────────────────────┘
+from dispersionrelations.complex import log_c, Complex2RS, log_lhc, schwarz_reflection
 
-gl_storage = {
-    100: (z_gl_100, w_gl_100),
-    500: (z_gl_500, w_gl_500),
-    1000: (z_gl_1000, w_gl_1000),
-    2000: (z_gl_2000, w_gl_2000),
-}
+# ┌──────────────────────────────────────────────────────────┐
+# │                       INTEGRALS                          │
+# └──────────────────────────────────────────────────────────┘
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                      Partitions                          │
+# └──────────────────────────────────────────────────────────┘
+
+Partition = NewType("Partition", NDArray[np.float64])
 
 
-def integrate_gl(function : callable, a : float, b : float, order : int = 100, split_n : int = 3):
-    r"""
-    Gauss–Legendre integration.
-    
-    Parameters
-    ----------
-    function : callable
-        A complex function of a single variable.
-    a : float, complex
-        Lower boundary of the integral.
-    b : float, complex
-        Upper boundary of the integral.
-    order : int
-        Quadrature order.
-    split_n : int
-        Number of subintervals of the same length :math:`[a,x], [x,y], ... [z,b]`.
+def even_partition(
+    split_n: int,
+) -> Partition:
+    if (split_n < 1) or (split_n % 1 != 0):
+        raise ValueError(
+            f"Number of intervals (split_n) must be at least 1 and an integer, instead got {split_n}."
+        )
+    partition = np.linspace(0, 1, split_n + 1)
+    return partition
 
-    Returns
-    -------
-    I : float, complex
-        Integral :math:`I = \int_a^b f(x) \mathrm{d}x`.
-    """
-    if order in gl_storage.keys():
-        (gl_roots, gl_weights) = gl_storage[order]
-    else:
-        (gl_roots, gl_weights) = np.polynomial.legendre.leggauss(order)
-    jacobian = (b - a) / 2 / split_n
-    s_prime = np.array(
-        [[(x + 1 + 2 * i) * jacobian + a for x in gl_roots] for i in range(split_n)]
+
+def logarithmic_partition(
+    split_n: int,
+    base: float = 2,
+) -> Partition:
+    if (split_n < 1) or (split_n % 1 != 0):
+        raise ValueError(
+            f"Number of intervals (split_n) must be at least 1 and an integer, instead got {split_n}."
+        )
+    partition = np.linspace(0, 1, split_n + 1)
+    partition[1:-1] = 1 / np.power(base, np.arange(split_n - 1, 0, -1))
+    return partition
+
+
+def distance_based_partition(
+    split_n: int,
+    distance_parallel: NDArray | float,
+    distance_transverse: NDArray | float,
+    min_distance_transverse: NDArray | float = 1e-3,
+) -> Partition:
+    if (split_n < 1) or (split_n % 1 != 0):
+        raise ValueError(
+            f"Number of intervals (split_n) must be at least 1 and an integer, instead got {split_n}."
+        )
+    center = np.asarray(distance_parallel)
+    height = np.maximum(
+        np.abs(np.asarray(distance_transverse)),
+        min_distance_transverse,
     )
-    return np.sum(function(s_prime) * gl_weights * jacobian)
+    norm = 1 / height * (np.atan((1 - center) / height) - np.atan(-center / height))
+    partition = np.empty((split_n + 1, *norm.shape))
+    partition[0, ...] = 0
+    partition[-1, ...] = 1
+    partition_in_between = np.linspace(0, 1, split_n + 1)[1:-1]
+    if partition.ndim > 1:
+        partition_in_between = np.expand_dims(
+            partition_in_between, axis=tuple(range(1, partition.ndim))
+        )
+    partition[1:-1] = center + height * np.tan(
+        (height * norm) * partition_in_between + np.atan(-center / height)
+    )
+    return np.moveaxis(partition, -1, 0)
 
 
-def residue(function : callable, z0 : complex, radius : float = 1e-2, order : int = 100, split_n : int = 3):
+def pole_based_partition(
+    split_n: int,
+    startpoint: NDArray | complex,
+    endpoint: NDArray | complex,
+    pole_position: complex,
+    min_distance: float = 1e-3,
+) -> Partition:
+    scale = np.abs(endpoint - startpoint)
+    start_to_end = (endpoint - startpoint) / scale
+    start_to_pole = (pole_position - startpoint) / scale
+    angle_pole_start_end = np.angle(start_to_pole / start_to_end)
+    center_scalar = np.abs(start_to_pole) * np.cos(angle_pole_start_end)
+    height_scalar = np.abs(np.abs(start_to_pole) * np.sin(angle_pole_start_end))
+    return distance_based_partition(
+        split_n, center_scalar, height_scalar, min_distance_transverse=min_distance
+    )
+
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                      Intervals                           │
+# └──────────────────────────────────────────────────────────┘
+
+Interval = NewType("Interval", NDArray[np.complex128])
+
+
+def remove_duplicate_neighbours(array, axis=-1):
+    "For more complicated dimensions, only those elements are retained, that are not considered duplicates in other slices."
+    array = np.asarray(array)
+
+    if np.any(np.take(array, 0, axis=axis) == np.take(array, -1, axis=axis)):
+        raise ValueError(
+            f"First and last index of chosen axis should not be equal, instead got {np.take(array, 0, axis = axis)} and {np.take(array, -1, axis = axis)}."
+        )
+
+    axis = axis % array.ndim
+    duplicate = np.roll(array, -1, axis=axis)
+
+    mask = array != duplicate
+    if array.ndim > 1:
+        axes = tuple(ax for ax in range(array.ndim) if ax != axis)
+        mask_big = 1 * mask
+        mask = np.prod(mask, axis=axes, dtype=bool)
+
+    no_dupl = array[..., mask]
+
+    return no_dupl
+
+
+def split_interval(
+    interval: Interval,
+    partition: Partition,
+) -> Interval:
+    interval = np.asarray(interval)
+    lower = interval[..., :-1]
+    upper = interval[..., 1:]
+    sizes = upper - lower
+    partition = np.clip(partition, 0, 1)
+    interval_split = lower[..., np.newaxis] + sizes[..., np.newaxis] * partition
+    interval_split_shape = interval_split.shape
+    interval_concat_shape = tuple(
+        [
+            *interval_split_shape[:-2],
+            interval_split_shape[-2] * interval_split_shape[-1],
+        ]
+    )
+    interval_concat = np.reshape(interval_split, interval_concat_shape)
+    interval_unique = remove_duplicate_neighbours(interval_concat, axis=-1)
+    return interval_unique
+
+
+# def split_interval_evenly(
+#     interval: Interval,
+#     split_n: int,
+# ) -> Interval:
+#     return split_interval(interval, even_partition(split_n))
+
+
+# def split_interval_logarithmically(
+#     interval: Interval,
+#     split_n: int,
+#     base: int = 2,
+# ) -> Interval:
+#     return split_interval(interval, logarithmic_partition(split_n, base))
+
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                      GL Routines                         │
+# └──────────────────────────────────────────────────────────┘
+
+gl_storage = {}
+
+
+def gl_roots_and_weights(
+    order: int = 100,
+) -> tuple[NDArray, NDArray]:
+    if order not in gl_storage.keys():
+        gl_storage[order] = np.polynomial.legendre.leggauss(order)
+    return gl_storage[order]
+
+
+def interval_to_gl(
+    interval,
+    gl_order: int = 100,
+):
+    interval = np.asarray(interval)
+    lower = interval[..., :-1]
+    upper = interval[..., 1:]
+    gl_roots, gl_weights = gl_roots_and_weights(gl_order)
+    jacobian = (upper - lower) / 2
+    points = lower[..., np.newaxis] + jacobian[..., np.newaxis] * (gl_roots + 1)
+    weights = jacobian[..., np.newaxis] * gl_weights
+    return points, weights
+
+
+def integrate_interval_gl(
+    function_x: Callable,
+    x_interval: Interval,
+    gl_order: int = 100,
+    partition: Partition | None = None,
+):
+    if partition is not None:
+        x_interval = split_interval(x_interval, partition)
+    else:
+        x_interval = np.asarray(x_interval)
+    x_gl, w_gl = interval_to_gl(x_interval, gl_order)
+    dim_x = len(x_interval.shape) - 1
+    gl_axes = tuple(dim_x + np.arange(2))
+    return np.sum(function_x(x_gl) * w_gl, gl_axes)
+
+
+def integrate_interval_second_variable_gl(
+    function_x_y: Callable,
+    x_values: NDArray,
+    y_interval: Interval,
+    order: int = 100,
+    y_bounds_depend_on_x: bool = False,
+) -> NDArray:
+    x_values = np.asarray(x_values)
+    y_interval = np.asarray(y_interval)
+    y_gl, w_gl = interval_to_gl(y_interval, order)
+    dim_x = len(x_values.shape)
+    dim_y = len(y_interval.shape) - 1
+    if y_bounds_depend_on_x:
+        x_axes = tuple(np.arange(dim_x))
+        y_axes = tuple(np.arange(dim_y))
+        gl_axes = tuple(dim_y + np.arange(2))
+        x_expanded = np.expand_dims(x_values, gl_axes)
+        y_expanded = y_gl
+        w_expanded = w_gl
+        f_expanded = function_x_y(x_expanded, y_expanded)
+        f_integrated = np.sum(f_expanded * w_expanded, gl_axes)
+        return f_integrated
+    x_axes = tuple(np.arange(dim_x))
+    y_axes = tuple(dim_x + np.arange(dim_y))
+    gl_axes = tuple(dim_x + dim_y + np.arange(2))
+    x_expanded = np.expand_dims(x_values, y_axes + gl_axes)
+    y_expanded = np.expand_dims(y_gl, x_axes)
+    w_expanded = np.expand_dims(w_gl, x_axes)
+    f_expanded = function_x_y(x_expanded, y_expanded)
+    f_integrated = np.sum(f_expanded * w_expanded, gl_axes)
+    return f_integrated
+
+
+def integrate_gl(
+    function_x: Callable,
+    x_lower: NDArray | complex,
+    x_upper: NDArray | complex,
+    gl_order: int = 100,
+    partition: Partition = even_partition(split_n=3),
+) -> NDArray | complex:
+    x_interval = np.stack((x_lower, x_upper), axis=-1)
+    return integrate_interval_gl(function_x, x_interval, gl_order, partition)
+
+
+# def integrate_gl(
+#     function: Callable[[complex], complex],
+#     a: float | complex,
+#     b: float | complex,
+#     order: int = 100,
+#     partition: Partition = even_partition(split_n=3),
+# ) -> complex:
+#     r"""
+#     Gauss–Legendre integration.
+
+#     Parameters
+#     ----------
+#     function : Callable
+#         A complex function of a single variable.
+#     a : float, complex
+#         Lower boundary of the integral.
+#     b : float, complex
+#         Upper boundary of the integral.
+#     order : int
+#         Quadrature order.
+#     split_n : int
+#         Number of subintervals of the same length :math:`[a,x], [x,y], ... [z,b]`.
+
+#     Returns
+#     -------
+#     I : float, complex
+#         Integral :math:`I = \int_a^b f(x) \mathrm{d}x`.
+#     """
+#     interval = partition()
+#     return integrate_interval_gl(function, interval, order)
+
+
+def residue(
+    function: Callable,
+    z0: complex,
+    radius: float = 1e-2,
+    order: int = 100,
+    partition: Partition = even_partition(split_n=3),
+) -> complex:
     r"""
     Residue of a complex function.
-    
+
     Parameters
     ----------
-    function : callable
+    function : Callable
         Complex function of a single variable.
     z0 : complex
         Complex point to compute the residue at.
@@ -77,14 +331,20 @@ def residue(function : callable, z0 : complex, radius : float = 1e-2, order : in
     >>> print(integrals.residue(lambda z: 13/(z-2-2j), z0=2+2j))
     np.complex128(13.000000000000007+4.3193350746692004e-15j)
     """
-    function_θ = (
-        lambda θ: 1
+    function_angle = (
+        lambda angle: 1
         / (2 * np.pi)
-        * function(z0 + radius * np.exp(1j * θ))
+        * function(z0 + radius * np.exp(1j * angle))
         * radius
-        * np.exp(1j * θ)
+        * np.exp(1j * angle)
     )
-    return integrate_gl(function_θ, 0, 2*np.pi, order, split_n)
+    return integrate_gl(function_angle, 0, 2 * np.pi, order, partition)
+
+
+# ┌──────────────────────────────────────────────────────────┐
+# │             Cauchy and dispersive integrals              │
+# └──────────────────────────────────────────────────────────┘
+
 
 class SimplePoleMonomial:
     r"""
@@ -94,13 +354,17 @@ class SimplePoleMonomial:
     ----------
     n : float
         Power of the shifted monomial (can be an integer or a half-integer).
-        
+
     Raises
     ------
     NotImplementedError
         Any input :code:`n` other than an integer or a half-integer triggers an error.
     """
-    def __init__(self, n : float):
+
+    def __init__(
+        self,
+        n: float,
+    ):
         self.n = n
         if n % 1 == 0:
             if n == 0:
@@ -127,10 +391,22 @@ class SimplePoleMonomial:
                 f"Integral assignment failed for n={self.n}. Only integers and half-integers are supported."
             )
 
-    def __definite_integral__(self, s, s0, a, b):
+    def __definite_integral__(
+        self,
+        s: float,
+        s0: float,
+        a: float,
+        b: float,
+    ) -> complex:
         return self.indefinite_integral(s, s0, b) - self.indefinite_integral(s, s0, a)
 
-    def __call__(self, s, s0, a, b):
+    def __call__(
+        self,
+        s: float,
+        s0: float,
+        a: float,
+        b: float,
+    ) -> complex:
         r"""
         Definite integral
 
@@ -197,67 +473,112 @@ class SimplePoleMonomial:
         """
         return self.__definite_integral__(s, s0, a, b)
 
-    def __indefinite_integral_00__(self, s, s0, x):
-        """Special case: n=0."""
-        return logC(x - s)
+    def logfunc(self, x):
+        return np.log(-(-x + 0j))  # through trial and error, needs to be double-checked
+        # return log_lhc(x) + 1j * np.pi
 
-    def __indefinite_integral_ZP__(self, s, s0, x):
+    def __indefinite_integral_00__(
+        self,
+        s: float,
+        s0: float,
+        x: float,
+    ) -> complex:
+        """Special case: n=0."""
+        return self.logfunc(x - s)
+
+    def __indefinite_integral_ZP__(
+        self,
+        s: float,
+        s0: float,
+        x: float,
+    ) -> complex:
         """n is a positive integer."""
         s_shifted = s - s0
         x_shifted = x - s0
-        w = s_shifted / x_shifted
 
-        result = np.log(x - s)
+        result = self.logfunc(x - s + 0j) * s_shifted**self.n
         for k in range(1, self.n + 1):
-            result += 1 / k * (1 / w) ** k
+            result += 1.0 / k * x_shifted**k * (s_shifted) ** (self.n - k)
 
-        return s_shifted**self.n * result
+        return result
 
-    def __indefinite_integral_ZM__(self, s, s0, x):
+    def __indefinite_integral_ZM__(
+        self,
+        s: float,
+        s0: float,
+        x: float,
+    ) -> complex:
         """n is a negative integer."""
-        s_shifted = s - s0
-        x_shifted = x - s0
+        s_shifted = s - s0 + 0j
+        x_shifted = x - s0 + 0j
         w = s_shifted / x_shifted
 
         # Special case:
         if self.n == -1:
-            return 1 / s_shifted * logC(1 - w)
-
+            return 1 / s_shifted * self.logfunc(1 - w + 0j)
         # The rest:
         n_abs = -self.n
-        result = logC(1 - w)
+        result = self.logfunc(1 - w) * s_shifted**self.n
         for k in range(1, n_abs):
-            result += 1 / k * w**k
+            result += 1.0 / k * s_shifted ** (k + self.n) / x_shifted**k
 
-        return s_shifted**self.n * result
+        return result
 
-    def __indefinite_integral_ZP_HALF__(self, s, s0, x):
+    def __indefinite_integral_ZP_HALF__(
+        self,
+        s: float,
+        s0: float,
+        x: float,
+    ) -> complex:
         """n is a positive half-integer."""
-        s_shifted = s - s0
-        x_shifted = x - s0
-        w = s_shifted / x_shifted
-        w_sqrt = np.sqrt(w + 0j)
+        s_shifted = s - s0 + 0j
+        x_shifted = x - s0 + 0j
 
-        m = 2 * self.n
-        result = logC((w_sqrt - 1) / (w_sqrt + 1))
+        m = int(2 * self.n)
+        result = (
+            np.log(
+                (np.sqrt(s_shifted) - np.sqrt(x_shifted))
+                / (np.sqrt(s_shifted) + np.sqrt(x_shifted))
+            )
+            * s_shifted**self.n
+        )
+
         for k in range(1, (m + 1) // 2 + 1):
-            result += (2 / (2 * k - 1)) * (1 / w_sqrt) ** (2 * k - 1)
+            result += (
+                (2 / (2 * k - 1))
+                * x_shifted ** ((2.0 * k - 1) / 2.0)
+                * s_shifted ** (self.n - (2 * k - 1) / 2)
+            )
 
-        return s_shifted**self.n * result
+        return result
 
-    def __indefinite_integral_ZM_HALF__(self, s, s0, x):
+    def __indefinite_integral_ZM_HALF__(
+        self,
+        s: float,
+        s0: float,
+        x: float,
+    ) -> complex:
         """n is a negative half-integer."""
-        s_shifted = s - s0
-        x_shifted = x - s0
-        w = s_shifted / x_shifted
-        w_sqrt = np.sqrt(w + 0j)
+        s_shifted = s - s0 + 0j
+        x_shifted = x - s0 + 0j
 
-        m = 2 * self.n
-        result = logC((w_sqrt - 1) / (w_sqrt + 1))
+        m = int(2 * self.n)
+        result = (
+            np.log(
+                (np.sqrt(s_shifted) - np.sqrt(x_shifted))
+                / (np.sqrt(s_shifted) + np.sqrt(x_shifted))
+            )
+            * s_shifted**self.n
+        )
         for k in range(1, (m - 1) // 2 + 1):
-            result += (2 / (2 * k - 1)) * w_sqrt ** (2 * k - 1)
 
-        return s_shifted**self.n * result
+            result += (
+                (2 / (2 * k - 1))
+                * s_shifted ** ((2.0 * k - 1.0) + self.n)
+                / x_shifted ** ((2.0 * k - 1.0) / 2.0)
+            )
+
+        return result
 
 
 class DispersionIntegralRHC:
@@ -266,7 +587,7 @@ class DispersionIntegralRHC:
 
     Parameters
     ----------
-    integrand : callable
+    integrand : Callable
         Integrand along the RHC.
     threshold : float
         Lower boundary of the integral.
@@ -291,18 +612,21 @@ class DispersionIntegralRHC:
     :math:`n` is the subtraction level, and
     :math:`f` is the `integrand`.
     """
+
     def __init__(
         self,
-        integrand : callable,
-        threshold : float,
-        infinity : float = 1e6,
-        integration_split_points : list[float] = [2, 5, 10, 50, 100],
-        integration_order : int = 100,
-        subtraction_point : float = 0,
-        subtraction_constants : list[float] = [0],
+        integrand: Callable,
+        threshold: float,
+        infinity: float = 1e6,
+        integration_split_points: list[float] = [2, 5, 10, 50, 100],
+        integration_order: int = 100,
+        subtraction_point: float = 0,
+        subtraction_constants: list[float] = [0],
     ):
+        if subtraction_point >= threshold:
+            raise ValueError("Please make sure that subtraction point < threshold")
         self.integrand = integrand
-        self.threshold = threshold
+        self.threshold = threshold  # TODO what if threshold is zero?!
         self.infinity = infinity
         self.interval_split = threshold * np.array(
             [1, *integration_split_points, infinity]
@@ -311,8 +635,6 @@ class DispersionIntegralRHC:
         self.order = integration_order
 
         self.s0 = subtraction_point
-        if self.s0 >= self.threshold:
-            warnings.warn(f"Subtraction point s0={self.s0} needs to be below the threshold={self.threshold}.")
         self.f0_arr = subtraction_constants
         self.n_subtr = len(subtraction_constants)
 
@@ -321,8 +643,10 @@ class DispersionIntegralRHC:
         self.__precompute__()
         # self.compute = np.vectorize(self.__compute__)
 
-    def __precompute__(self):
-        (self.gl_roots, self.gl_weights) = np.polynomial.legendre.leggauss(self.order)
+    def __precompute__(
+        self,
+    ) -> None:
+        self.gl_roots, self.gl_weights = gl_roots_and_weights(self.order)
 
         intervals = []
         scalings = []
@@ -343,7 +667,10 @@ class DispersionIntegralRHC:
         self.s_prime = np.array(s_prime).T
         self.f_at_s_prime = self.integrand(self.s_prime)
 
-    def __compute_real__(self, s):
+    def __compute_real__(
+        self,
+        s: NDArray | float,
+    ) -> NDArray | complex:
         s = np.array(s)
         dim_s = len(s.shape)
         s_axes = tuple(np.arange(dim_s))
@@ -382,8 +709,41 @@ class DispersionIntegralRHC:
             polynomial_head += self.f0_arr[i] * (s - self.s0) ** i
 
         return polynomial_head + (1 / np.pi) * (numerical_integral + analytic_integral)
-    
-    def __compute_complex__(self, s):
+
+    # def __compute_complex__(
+    #     self,
+    #     s: NDArray | complex,
+    # ) -> NDArray | complex:
+    #     s = np.array(s)
+    #     dim_s = len(s.shape)
+    #     s_axes = tuple(np.arange(dim_s))
+    #     gl_axes = tuple(dim_s + np.arange(2))
+
+    #     scaled_weights = np.expand_dims(self.scaled_weights, s_axes)
+    #     __s__ = np.expand_dims(s, gl_axes)
+    #     __s_prime__ = np.expand_dims(self.s_prime, s_axes)
+    #     __f_at_s_prime__ = np.expand_dims(self.f_at_s_prime, s_axes)
+
+    #     integrand = (
+    #         (__s__ - self.s0) ** self.n_subtr
+    #         * (__f_at_s_prime__)
+    #         / ((__s_prime__ - self.s0) ** self.n_subtr * (__s_prime__ - __s__))
+    #     )
+
+    #     numerical_integral = np.zeros(s.shape, dtype=np.complex128)
+
+    #     numerical_integral += np.sum(integrand * scaled_weights, gl_axes)
+
+    #     polynomial_head = 0.0
+    #     for i in range(self.n_subtr):
+    #         polynomial_head += self.f0_arr[i] * (s - self.s0) ** i
+
+    #     return polynomial_head + (1 / np.pi) * numerical_integral
+
+    def __compute_complex__(
+        self,
+        s: NDArray | complex,
+    ) -> NDArray | complex:
         s = np.array(s)
         dim_s = len(s.shape)
         s_axes = tuple(np.arange(dim_s))
@@ -392,25 +752,54 @@ class DispersionIntegralRHC:
         scaled_weights = np.expand_dims(self.scaled_weights, s_axes)
         __s__ = np.expand_dims(s, gl_axes)
         __s_prime__ = np.expand_dims(self.s_prime, s_axes)
+        # __f_at_s__ = self.integrand(np.real(s))
+        f_at_s = np.zeros_like(s)
+        mask_s_above_cut = (np.real(s) >= self.threshold)
+        f_at_s[mask_s_above_cut] = self.integrand(np.real(s[mask_s_above_cut]))
+        __f_at_s__ = np.expand_dims(f_at_s, gl_axes)
         __f_at_s_prime__ = np.expand_dims(self.f_at_s_prime, s_axes)
+        __f_at_s_prime_sub__ = __f_at_s_prime__ - __f_at_s__
 
         integrand = (
             (__s__ - self.s0) ** self.n_subtr
-            * (__f_at_s_prime__)
+            * (__f_at_s_prime_sub__)
             / ((__s_prime__ - self.s0) ** self.n_subtr * (__s_prime__ - __s__))
         )
 
         numerical_integral = np.zeros(s.shape, dtype=np.complex128)
-        
+        analytic_integral = np.zeros(s.shape, dtype=np.complex128)
+
         numerical_integral += np.sum(integrand * scaled_weights, gl_axes)
+
+        # __f_at_s__ = np.zeros_like(s)
+        # mask_s_above_cut = np.real(s) >= self.threshold
+        # __f_at_s__[mask_s_above_cut] = self.integrand(np.real(s[mask_s_above_cut]))
+
+        # print("shapes:")
+        # print(s[mask_s_above_cut].shape)
+        # print(self.s0)
+
+        analytic_integral[mask_s_above_cut] += (
+            f_at_s[mask_s_above_cut]
+            * (s[mask_s_above_cut] - self.s0) ** self.n_subtr
+            # * np.where(
+                # np.imag(s[mask_s_above_cut]) == 0,
+                * self.analytic_remainder(s[mask_s_above_cut], self.s0, self.threshold, np.inf)#,
+                # 0,
+            # )
+        )
 
         polynomial_head = 0.0
         for i in range(self.n_subtr):
             polynomial_head += self.f0_arr[i] * (s - self.s0) ** i
 
-        return polynomial_head + (1 / np.pi) * numerical_integral
+        return polynomial_head + (1 / np.pi) * (numerical_integral + analytic_integral)
 
-    def __call__(self, s):
+
+    def __call__(
+        self,
+        s: NDArray | complex,
+    ) -> NDArray | complex:
         r"""
         Parameters
         ----------
@@ -432,51 +821,11 @@ class DispersionIntegralRHC:
         return result
 
 
-class OmnesFunction(DispersionIntegralRHC):
-    r"""
-    Omnès–Muskhelishvili solution :cite:`Omnes:1958hv`.
-
-    Parameters
-    ----------
-    integrand : callable
-        Integrand along the RHC.
-    threshold : float
-        Lower boundary of the integral.
-    infinity : float, optional
-        Upper boundary of the integral in the units of :code:`threshold`.
-    integration_split_points : array_like, optional
-        Integration split points in the units of :code:`threshold`.
-    integration_order : int, optional
-        Gauss–Legendre quadrature order.
-    subtraction_point : float, optional
-        Point :math:`s_0` of subtraction.
-    subtraction_constants : array_like, optional
-        Array of :math:`f_i` subtraction constants. Defines subtraction level :math:`n`.
-
-    Notes
-    -----
-    The function is defined as
-
-    .. math:: \Omega(s) = \exp\left(\sum_{i=0}^{n-1}f_i (s-s_0)^i + \frac{(s-s_0)^n}{\pi}\int_{s_{thr}}^{\infty}\frac{\delta(x) \, dx}{(x-s_0)^n(x-s-i\epsilon)}\right),
-
-    where :math:`s_0` is the subtraction point, :math:`f_i` are the subtraction constants for :math:`\log\Omega`,
-    :math:`n` is the subtraction level, and
-    :math:`\delta` is the input phase, passed as `integrand`.
-
-    See Also
-    --------
-    dispersionrelations.integrals.DispersionIntegralRHC
-    """
-    def __call__(self, s):
-        r"""
-        Parameters
-        ----------
-        s : array_like
-            Four-momentum squared of the propagating particle.
-
-        Returns
-        -------
-        Ω : array_like
-            The same shape as input `s`.
-        """
-        return np.exp(super().__call__(s))
+def disp_int_to_complex_2RS(di: DispersionIntegralRHC, cf: Complex2RS):
+    f_1_di = lambda z: di.__call__(z)
+    f_disc_di = schwarz_reflection(lambda z: 2j * di.integrand(z))
+    f_2_di = lambda z: f_1_di(z) - f_disc_di(z)
+    #
+    cf.sheet_1.add_function(Domainify(f_1_di))
+    cf.sheet_2.add_function(Domainify(f_2_di))
+    cf.discontinuity.add_function(Domainify(f_disc_di))

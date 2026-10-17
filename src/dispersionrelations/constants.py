@@ -4,9 +4,22 @@ Most masses and widths are taken by the Review of Particle Physics by the Partic
 The base unit is taken to be `GeV`.
 """
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                         Logging                          │
+# └──────────────────────────────────────────────────────────┘
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ┌──────────────────────────────────────────────────────────┐
+# │                    External imports                      │
+# └──────────────────────────────────────────────────────────┘
 import numpy as np
 from uncertainties import ufloat
 
+# ┌──────────────────────────────────────────────────────────┐
+# │                       CONSTANTS                          │
+# └──────────────────────────────────────────────────────────┘
 
 MeV = 1e-3
 r"""Megaelectronvolt, numerically defined as :math:`10^{-3}` as a default (so that :code:`GeV` :math:`=1`)."""
@@ -163,7 +176,7 @@ BR_OMEGA_TO_PI0GAMMA = 8.33 / 100
 r"""Branching ratio of :math:`\omega \to \pi^0 \gamma` decay :cite:`Zyla:2020zbs`."""
 
 BR_OMEGA_TO_PI0GAMMA_STD = 0.25 / 100
-r"""Standard deviation of the branching ratio of :math:`\omega \to \pi^0 \gamma` decay :cite:`Zyla:2020zbs`.""" 
+r"""Standard deviation of the branching ratio of :math:`\omega \to \pi^0 \gamma` decay :cite:`Zyla:2020zbs`."""
 
 __BR_OMEGA_TO_PI0GAMMA = ufloat(BR_OMEGA_TO_PI0GAMMA, BR_OMEGA_TO_PI0GAMMA_STD)
 __G_OMEGA_TO_PI0GAMMA = __G_OMEGA * __BR_OMEGA_TO_PI0GAMMA
@@ -193,8 +206,12 @@ BR_KSTAR_TO_KGAMMA_NEUTRAL_STD = 0.021 / 100
 r"""Standard deviation of the branching ratio of the neutral :math:`K^* \to K \gamma` decay :cite:`Dax:2020dzg`."""
 
 __G_KSTAR = ufloat(G_KSTAR, G_KSTAR_STD)
-__BR_KSTAR_TO_KGAMMA_CHARGED = ufloat(BR_KSTAR_TO_KGAMMA_CHARGED, BR_KSTAR_TO_KGAMMA_CHARGED_STD)
-__BR_KSTAR_TO_KGAMMA_NEUTRAL = ufloat(BR_KSTAR_TO_KGAMMA_NEUTRAL, BR_KSTAR_TO_KGAMMA_NEUTRAL_STD)
+__BR_KSTAR_TO_KGAMMA_CHARGED = ufloat(
+    BR_KSTAR_TO_KGAMMA_CHARGED, BR_KSTAR_TO_KGAMMA_CHARGED_STD
+)
+__BR_KSTAR_TO_KGAMMA_NEUTRAL = ufloat(
+    BR_KSTAR_TO_KGAMMA_NEUTRAL, BR_KSTAR_TO_KGAMMA_NEUTRAL_STD
+)
 __G_KSTAR_TO_KGAMMA_CHARGED = __G_KSTAR * __BR_KSTAR_TO_KGAMMA_CHARGED
 __G_KSTAR_TO_KGAMMA_NEUTRAL = __G_KSTAR * __BR_KSTAR_TO_KGAMMA_NEUTRAL
 
