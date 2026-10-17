@@ -33,7 +33,7 @@ r"""Kiloelectronvolt, numerically defined as :math:`10^{-3}\times` :code:`MeV`."
 GeV = 1e3 * MeV
 r"""Gigaelectronvolt, numerically defined as :math:`10^{3}\times` :code:`MeV`."""
 
-TeV = 1e6 * GeV
+TeV = 1e6 * MeV
 r"""Teraelectronvolt, numerically defined as :math:`10^{6}\times` :code:`MeV`."""
 
 E_almost_zero = 1e-5 * GeV
